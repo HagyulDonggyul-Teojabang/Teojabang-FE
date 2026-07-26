@@ -1,122 +1,132 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useMemo, useState } from 'react'
+import ConditionForm from './components/ConditionForm'
+import CostReport from './components/CostReport'
+import RankingResult from './components/RankingResult'
+import VisitApplicationForm, { VisitComplete } from './components/VisitApplication'
+import { mockHouses } from './data/mockHouses'
+import type { AppStep, UserConditions, VisitApplication } from './types'
+import { calculateCost } from './utils/costCalculator'
+import { rankHouses } from './utils/scoring'
+import { saveVisitApplication } from './utils/visitStorage'
 
-function App() {
-  const [count, setCount] = useState(0)
+const STEPS: { key: AppStep; label: string }[] = [
+  { key: 'conditions', label: '조건 입력' },
+  { key: 'ranking', label: 'AI 분석' },
+  { key: 'cost', label: '정착비용' },
+  { key: 'visit', label: '방문 신청' },
+]
+
+export default function App() {
+  const [step, setStep] = useState<AppStep>('conditions')
+  const [conditions, setConditions] = useState<UserConditions | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [application, setApplication] = useState<VisitApplication | null>(null)
+
+  const ranked = useMemo(
+    () => (conditions ? rankHouses(mockHouses, conditions) : []),
+    [conditions],
+  )
+
+  const selectedHouse = mockHouses.find((h) => h.id === selectedId) ?? null
+
+  const cost = useMemo(() => {
+    if (!selectedHouse || !conditions) return null
+    return calculateCost(selectedHouse, conditions)
+  }, [selectedHouse, conditions])
+
+  function handleConditionsSubmit(data: UserConditions) {
+    setConditions(data)
+    setSelectedId(null)
+    setApplication(null)
+    setStep('ranking')
+  }
+
+  function handleVisitSubmit(data: Omit<VisitApplication, 'submittedAt'>) {
+    const full: VisitApplication = { ...data, submittedAt: new Date().toISOString() }
+    saveVisitApplication(full)
+    setApplication(full)
+    setStep('complete')
+  }
+
+  function handleRestart() {
+    setStep('conditions')
+    setConditions(null)
+    setSelectedId(null)
+    setApplication(null)
+  }
+
+  const stepIndex = STEPS.findIndex((s) => s.key === step)
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+    <div className="app">
+      <header className="app-header">
+        <div className="logo">
+          <span className="logo-icon">🏠</span>
+          <div>
+            <h1>터잡앙</h1>
+            <p className="tagline">AI 기반 청년농 맞춤 빈집 분석·비교</p>
+          </div>
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
 
-      <div className="ticks"></div>
+        {step !== 'complete' && (
+          <nav className="step-nav" aria-label="진행 단계">
+            {STEPS.map((s, i) => (
+              <div
+                key={s.key}
+                className={`step-item ${i <= stepIndex ? 'active' : ''} ${i === stepIndex ? 'current' : ''}`}
+              >
+                <span className="step-num">{i + 1}</span>
+                <span className="step-label">{s.label}</span>
+              </div>
+            ))}
+          </nav>
+        )}
+      </header>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+      <main className="app-main">
+        {step === 'conditions' && (
+          <ConditionForm initial={conditions ?? undefined} onSubmit={handleConditionsSubmit} />
+        )}
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+        {step === 'ranking' && conditions && (
+          <RankingResult
+            ranked={ranked}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onNext={() => setStep('cost')}
+            onBack={() => setStep('conditions')}
+          />
+        )}
+
+        {step === 'cost' && selectedHouse && cost && (
+          <CostReport
+            house={selectedHouse}
+            cost={cost}
+            onNext={() => setStep('visit')}
+            onBack={() => setStep('ranking')}
+          />
+        )}
+
+        {step === 'visit' && selectedHouse && (
+          <VisitApplicationForm
+            house={selectedHouse}
+            onSubmit={handleVisitSubmit}
+            onBack={() => setStep('cost')}
+          />
+        )}
+
+        {step === 'complete' && application && selectedHouse && (
+          <VisitComplete
+            application={application}
+            house={selectedHouse}
+            onRestart={handleRestart}
+          />
+        )}
+      </main>
+
+      <footer className="app-footer">
+        <p>2026 제주 지역대학 연합 창업 캠프 · 터잡앙 MVP 데모</p>
+      </footer>
+    </div>
   )
 }
-
-export default App
