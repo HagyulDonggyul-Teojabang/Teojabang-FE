@@ -1,9 +1,19 @@
-import type { DiagnosisItem, DiagnosisStatus, House, Region } from '../types'
+import type { DiagnosisItem, DiagnosisStatus, House, HouseRegisterInput, Region } from '../types'
 
 export interface InferredHouseFlags {
   vehicleAccess?: boolean
   hasWarehouse?: boolean
   hasYard?: boolean
+}
+
+const REGIONS: Region[] = ['서귀포', '제주시', '성산', '한림', '구좌']
+
+function inferRegion(address: string): Region {
+  if (address.includes('서귀포')) return '서귀포'
+  for (const region of REGIONS) {
+    if (address.includes(region)) return region
+  }
+  return '제주시'
 }
 
 function statusImpliesGood(status: DiagnosisStatus | undefined): boolean {
@@ -17,17 +27,19 @@ function inferFromDiagnosis(
   return diagnosis.find((d) => d.category.includes(categoryIncludes))?.status
 }
 
-export function buildHouseRegisterMeta(index: number) {
+export function buildHouseRegisterMeta(index: number, input: HouseRegisterInput) {
+  const otherFeatures = input.otherFeatures?.trim()
   return {
-    name: `업로드 빈집 ${index + 1}`,
-    region: '제주시' as Region,
-    address: '제주 (사용자 업로드 · 사진 분석)',
+    name: input.name.trim(),
+    address: input.address.trim(),
+    region: inferRegion(input.address),
     area: 70 + index * 5,
-    rent: 280000 + index * 40000,
-    deposit: 5000000 + index * 2000000,
-    vehicleAccess: false,
-    hasWarehouse: false,
-    hasYard: false,
+    rent: Math.max(1, Math.round(input.rentYearly / 12)),
+    deposit: input.deposit,
+    vehicleAccess: input.vehicleAccess,
+    hasWarehouse: input.hasWarehouse,
+    hasYard: input.hasYard,
+    otherFeatures: otherFeatures || undefined,
     publicTransportScore: 3,
   }
 }

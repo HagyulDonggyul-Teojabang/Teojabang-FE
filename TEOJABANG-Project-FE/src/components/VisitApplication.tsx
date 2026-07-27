@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { House, VisitApplication } from '../types'
 import { STATUS_LABEL } from '../utils/format'
 
@@ -13,6 +14,11 @@ export default function VisitApplicationForm({
   onBack,
 }: VisitApplicationFormProps) {
   const checklistItems = house.diagnosis.filter((d) => d.status === 'onsite')
+  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({})
+
+  function toggleChecklistItem(category: string) {
+    setCheckedItems((prev) => ({ ...prev, [category]: !prev[category] }))
+  }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -25,6 +31,11 @@ export default function VisitApplicationForm({
       name: form.get('name') as string,
       phone: form.get('phone') as string,
       memo: (form.get('memo') as string) || '',
+      checklist: checklistItems.map((item) => ({
+        category: item.category,
+        note: item.note,
+        checked: !!checkedItems[item.category],
+      })),
     })
   }
 
@@ -45,7 +56,12 @@ export default function VisitApplicationForm({
           {checklistItems.length > 0 ? (
             checklistItems.map((item) => (
               <li key={item.category}>
-                <input type="checkbox" id={item.category} readOnly />
+                <input
+                  type="checkbox"
+                  id={item.category}
+                  checked={!!checkedItems[item.category]}
+                  onChange={() => toggleChecklistItem(item.category)}
+                />
                 <label htmlFor={item.category}>
                   <strong>{item.category}</strong> — {item.note}
                   <span className={`status-badge status-${item.status}`}>
@@ -110,7 +126,16 @@ interface VisitCompleteProps {
 }
 
 export function VisitComplete({ application, house, onRestart }: VisitCompleteProps) {
-  const checklistItems = house.diagnosis.filter((d) => d.status === 'onsite')
+  const checklistItems =
+    application.checklist?.length
+      ? application.checklist
+      : house.diagnosis
+          .filter((d) => d.status === 'onsite')
+          .map((item) => ({
+            category: item.category,
+            note: item.note,
+            checked: false,
+          }))
 
   return (
     <section className="panel complete-panel">
@@ -139,11 +164,20 @@ export function VisitComplete({ application, house, onRestart }: VisitCompletePr
       <div className="checklist-box">
         <h3>방문 시 확인 체크리스트</h3>
         <ul className="checklist">
-          {checklistItems.map((item) => (
-            <li key={item.category}>
-              <strong>{item.category}</strong> — {item.note}
-            </li>
-          ))}
+          {checklistItems.length > 0 ? (
+            checklistItems.map((item) => (
+              <li key={item.category} className={item.checked ? 'checklist-item-checked' : ''}>
+                <span className="checklist-mark" aria-hidden="true">
+                  {item.checked ? '☑' : '☐'}
+                </span>
+                <span>
+                  <strong>{item.category}</strong> — {item.note}
+                </span>
+              </li>
+            ))
+          ) : (
+            <li>현장 확인 필요 항목 없음 — 일반 점검 진행</li>
+          )}
         </ul>
       </div>
 

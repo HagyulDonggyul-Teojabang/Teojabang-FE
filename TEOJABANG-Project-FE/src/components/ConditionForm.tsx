@@ -1,5 +1,6 @@
 import type { UserConditions } from '../types'
 import { CROPS, REGIONS } from '../data/mockHouses'
+import { useEffect, useState } from 'react'
 
 interface ConditionFormProps {
   initial?: UserConditions
@@ -10,15 +11,22 @@ interface ConditionFormProps {
 const defaultConditions: UserConditions = {
   region: '서귀포',
   crop: '감귤',
-  farmSize: 3000,
+  farmSize: 300,
   budget: 50000000,
   hasVehicle: true,
   needsWarehouse: true,
   needsYard: true,
 }
 
+const FARM_SIZE_PRESETS = [100, 200, 300, 500] as const
+
 export default function ConditionForm({ initial, housesReady, onSubmit }: ConditionFormProps) {
   const conditions = initial ?? defaultConditions
+  const [farmSize, setFarmSize] = useState(conditions.farmSize)
+
+  useEffect(() => {
+    if (initial) setFarmSize(initial.farmSize)
+  }, [initial])
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -28,9 +36,9 @@ export default function ConditionForm({ initial, housesReady, onSubmit }: Condit
       crop: form.get('crop') as UserConditions['crop'],
       farmSize: Number(form.get('farmSize')),
       budget: Number(form.get('budget')),
-      hasVehicle: form.get('hasVehicle') === 'on',
-      needsWarehouse: form.get('needsWarehouse') === 'on',
-      needsYard: form.get('needsYard') === 'on',
+      hasVehicle: defaultConditions.hasVehicle,
+      needsWarehouse: defaultConditions.needsWarehouse,
+      needsYard: defaultConditions.needsYard,
     })
   }
 
@@ -65,16 +73,29 @@ export default function ConditionForm({ initial, housesReady, onSubmit }: Condit
           </select>
         </label>
 
-        <label>
+        <label className="full-width">
           농지 크기 (평)
           <input
             type="number"
             name="farmSize"
-            defaultValue={conditions.farmSize}
-            min={100}
-            max={20000}
-            step={100}
+            value={farmSize}
+            onChange={(e) => setFarmSize(Number(e.target.value))}
+            min={50}
+            max={1000}
+            step={10}
           />
+          <div className="farm-size-presets">
+            {FARM_SIZE_PRESETS.map((size) => (
+              <button
+                key={size}
+                type="button"
+                className={`farm-size-preset${farmSize === size ? ' active' : ''}`}
+                onClick={() => setFarmSize(size)}
+              >
+                {size}평
+              </button>
+            ))}
+          </div>
         </label>
 
         <label>
@@ -87,26 +108,6 @@ export default function ConditionForm({ initial, housesReady, onSubmit }: Condit
             step={1000000}
           />
         </label>
-
-        <fieldset className="checkbox-group">
-          <legend>필요 조건</legend>
-          <label className="checkbox">
-            <input type="checkbox" name="hasVehicle" defaultChecked={conditions.hasVehicle} />
-            1톤 트럭·농기계 사용
-          </label>
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              name="needsWarehouse"
-              defaultChecked={conditions.needsWarehouse}
-            />
-            창고 필요
-          </label>
-          <label className="checkbox">
-            <input type="checkbox" name="needsYard" defaultChecked={conditions.needsYard} />
-            마당 필요
-          </label>
-        </fieldset>
 
         {!housesReady && (
           <p className="form-hint">빈집 3채 사진 업로드·AI 분석을 모두 완료해 주세요.</p>

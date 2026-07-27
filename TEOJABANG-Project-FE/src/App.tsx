@@ -162,9 +162,10 @@ export default function App() {
           />
         )}
 
-        {step === 'cost' && selectedHouse && cost && (
+        {step === 'cost' && selectedHouse && cost && conditions && (
           <CostReport
             house={selectedHouse}
+            conditions={conditions}
             cost={cost}
             onNext={() => setStep('visit')}
             onBack={() => setStep('ranking')}
