@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 import ConditionForm from './components/ConditionForm'
 import CostReport from './components/CostReport'
+import HousePhotoAnalyze from './components/HousePhotoAnalyze'
 import RankingResult from './components/RankingResult'
 import VisitApplicationForm, { VisitComplete } from './components/VisitApplication'
-import { mockHouses } from './data/mockHouses'
-import type { AppStep, UserConditions, VisitApplication } from './types'
+import type { AppStep, House, UserConditions, VisitApplication } from './types'
 import { calculateCost } from './utils/costCalculator'
 import { rankHouses } from './utils/scoring'
 import { saveVisitApplication } from './utils/visitStorage'
@@ -19,15 +19,17 @@ const STEPS: { key: AppStep; label: string }[] = [
 export default function App() {
   const [step, setStep] = useState<AppStep>('conditions')
   const [conditions, setConditions] = useState<UserConditions | null>(null)
+  const [houses, setHouses] = useState<House[]>([])
+  const [housesReady, setHousesReady] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [application, setApplication] = useState<VisitApplication | null>(null)
 
   const ranked = useMemo(
-    () => (conditions ? rankHouses(mockHouses, conditions) : []),
-    [conditions],
+    () => (conditions && houses.length > 0 ? rankHouses(houses, conditions) : []),
+    [conditions, houses],
   )
 
-  const selectedHouse = mockHouses.find((h) => h.id === selectedId) ?? null
+  const selectedHouse = houses.find((h) => h.id === selectedId) ?? null
 
   const cost = useMemo(() => {
     if (!selectedHouse || !conditions) return null
@@ -35,6 +37,7 @@ export default function App() {
   }, [selectedHouse, conditions])
 
   function handleConditionsSubmit(data: UserConditions) {
+    if (!housesReady || houses.length < 3) return
     setConditions(data)
     setSelectedId(null)
     setApplication(null)
@@ -51,6 +54,8 @@ export default function App() {
   function handleRestart() {
     setStep('conditions')
     setConditions(null)
+    setHouses([])
+    setHousesReady(false)
     setSelectedId(null)
     setApplication(null)
   }
@@ -85,7 +90,17 @@ export default function App() {
 
       <main className="app-main">
         {step === 'conditions' && (
-          <ConditionForm initial={conditions ?? undefined} onSubmit={handleConditionsSubmit} />
+          <>
+            <HousePhotoAnalyze
+              onHousesChange={setHouses}
+              onReadyChange={setHousesReady}
+            />
+            <ConditionForm
+              initial={conditions ?? undefined}
+              housesReady={housesReady}
+              onSubmit={handleConditionsSubmit}
+            />
+          </>
         )}
 
         {step === 'ranking' && conditions && (

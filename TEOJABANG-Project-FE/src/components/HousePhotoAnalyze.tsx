@@ -1,0 +1,358 @@
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import type { DiagnosisItem, House } from '../types'
+import { buildHouseFromUpload, type InferredHouseMeta } from '../utils/buildHouseFromUpload'
+import { formatDiagnosisSummary } from '../utils/format'
+import { analyzeHouseImages } from '../utils/geminiAnalyze'
+
+const MAX_ROWS = 3
+const PROGRESS_CAP = 90
+const COMPLETE_ANIM_MS = 500
+
+const ESTIMATE_BASE_MS = 12_000
+const ESTIMATE_PER_IMAGE_MS = 3_000
+const ESTIMATE_PER_MB_MS = 2_000
+
+function estimateAnalysisMs(files: File[]): number {
+  const totalMb = files.reduce((sum, file) => sum + file.size, 0) / (1024 * 1024)
+  return ESTIMATE_BASE_MS + files.length * ESTIMATE_PER_IMAGE_MS + totalMb * ESTIMATE_PER_MB_MS
+}
+
+/** 예상 시간 기준 ease-out — 0%에서부터 끊김 없이 서서히 가속 */
+function progressTarget(elapsedMs: number, estimatedMs: number): number {
+  const tau = estimatedMs / 2.3
+  return PROGRESS_CAP * (1 - Math.exp(-elapsedMs / tau))
+}
+
+type RowStatus = 'idle' | 'analyzing' | 'done' | 'error'
+
+interface UploadRow {
+  id: string
+  files: File[]
+  previewUrls: string[]
+  status: RowStatus
+  progress: number
+  summary: string | null
+  diagnosis: DiagnosisItem[] | null
+  houseMeta: InferredHouseMeta | null
+  error: string | null
+}
+
+function createRow(): UploadRow {
+  return {
+    id: crypto.randomUUID(),
+    files: [],
+    previewUrls: [],
+    status: 'idle',
+    progress: 0,
+    summary: null,
+    diagnosis: null,
+    houseMeta: null,
+    error: null,
+  }
+}
+
+interface HousePhotoAnalyzeProps {
+  onHousesChange: (houses: House[]) => void
+  onReadyChange: (ready: boolean) => void
+}
+
+export default function HousePhotoAnalyze({ onHousesChange, onReadyChange }: HousePhotoAnalyzeProps) {
+  const [rows, setRows] = useState<UploadRow[]>([createRow()])
+  const progressControllers = useRef<Map<string, { cancel: () => void }>>(new Map())
+  const displayProgressRef = useRef<Map<string, number>>(new Map())
+
+  const stopProgress = useCallback((rowId: string) => {
+    const controller = progressControllers.current.get(rowId)
+    if (controller) {
+      controller.cancel()
+      progressControllers.current.delete(rowId)
+    }
+  }, [])
+
+  useEffect(() => {
+    const controllers = progressControllers.current
+    return () => {
+      controllers.forEach((controller) => controller.cancel())
+      controllers.clear()
+    }
+  }, [])
+
+  const syncParent = useCallback(
+    (nextRows: UploadRow[]) => {
+      const houses: House[] = []
+      nextRows.forEach((row, index) => {
+        if (row.status === 'done' && row.diagnosis && row.previewUrls[0]) {
+          houses.push(
+            buildHouseFromUpload(index, row.diagnosis, row.previewUrls[0], row.houseMeta ?? {}),
+          )
+        }
+      })
+      onHousesChange(houses)
+      const ready =
+        nextRows.length === MAX_ROWS &&
+        nextRows.every((row) => row.status === 'done' && row.diagnosis !== null)
+      onReadyChange(ready)
+    },
+    [onHousesChange, onReadyChange],
+  )
+
+  useEffect(() => {
+    syncParent(rows)
+  }, [rows, syncParent])
+
+  function startProgress(rowId: string, files: File[]) {
+    stopProgress(rowId)
+
+    const startedAt = performance.now()
+    const estimatedMs = estimateAnalysisMs(files)
+    displayProgressRef.current.set(rowId, 0)
+
+    let rafId = 0
+    let cancelled = false
+
+    const tick = () => {
+      if (cancelled) return
+
+      const elapsed = performance.now() - startedAt
+      const next = progressTarget(elapsed, estimatedMs)
+      displayProgressRef.current.set(rowId, next)
+
+      setRows((prevRows) =>
+        prevRows.map((row) =>
+          row.id === rowId && row.status === 'analyzing'
+            ? { ...row, progress: next }
+            : row,
+        ),
+      )
+
+      rafId = requestAnimationFrame(tick)
+    }
+
+    rafId = requestAnimationFrame(tick)
+    progressControllers.current.set(rowId, {
+      cancel: () => {
+        cancelled = true
+        cancelAnimationFrame(rafId)
+      },
+    })
+  }
+
+  function animateProgressTo100(rowId: string): Promise<void> {
+    const from = displayProgressRef.current.get(rowId) ?? 0
+    const startedAt = performance.now()
+
+    return new Promise((resolve) => {
+      let rafId = 0
+
+      const tick = () => {
+        const t = Math.min(1, (performance.now() - startedAt) / COMPLETE_ANIM_MS)
+        const eased = 1 - (1 - t) ** 3
+        const next = from + (100 - from) * eased
+        displayProgressRef.current.set(rowId, next)
+
+        setRows((prevRows) =>
+          prevRows.map((row) =>
+            row.id === rowId ? { ...row, progress: next } : row,
+          ),
+        )
+
+        if (t < 1) {
+          rafId = requestAnimationFrame(tick)
+        } else {
+          displayProgressRef.current.set(rowId, 100)
+          resolve()
+        }
+      }
+
+      rafId = requestAnimationFrame(tick)
+      progressControllers.current.set(rowId, {
+        cancel: () => {
+          cancelAnimationFrame(rafId)
+          resolve()
+        },
+      })
+    })
+  }
+
+  async function runAnalysis(rowId: string, files: File[]) {
+    displayProgressRef.current.set(rowId, 0)
+    setRows((prev) =>
+      prev.map((row) =>
+        row.id === rowId
+          ? { ...row, status: 'analyzing', progress: 0, error: null }
+          : row,
+      ),
+    )
+    startProgress(rowId, files)
+
+    try {
+      const { diagnosis, summary, houseMeta } = await analyzeHouseImages(files)
+      stopProgress(rowId)
+      await animateProgressTo100(rowId)
+      progressControllers.current.delete(rowId)
+
+      setRows((prev) =>
+        prev.map((row) =>
+          row.id === rowId
+            ? {
+                ...row,
+                status: 'done',
+                progress: 100,
+                diagnosis,
+                summary: summary || formatDiagnosisSummary(diagnosis),
+                houseMeta: houseMeta ?? null,
+                error: null,
+              }
+            : row,
+        ),
+      )
+    } catch (err) {
+      stopProgress(rowId)
+      displayProgressRef.current.delete(rowId)
+      setRows((prev) =>
+        prev.map((row) =>
+          row.id === rowId
+            ? {
+                ...row,
+                status: 'error',
+                progress: 0,
+                error: err instanceof Error ? err.message : '분석에 실패했습니다',
+              }
+            : row,
+        ),
+      )
+    }
+  }
+
+  function handleFiles(rowId: string, fileList: FileList | null) {
+    if (!fileList?.length) return
+
+    stopProgress(rowId)
+    const files = Array.from(fileList).slice(0, 8)
+    const previewUrls = files.map((file) => URL.createObjectURL(file))
+
+    setRows((prev) =>
+      prev.map((row) => {
+        if (row.id !== rowId) return row
+        row.previewUrls.forEach((url) => URL.revokeObjectURL(url))
+        return {
+          ...row,
+          files,
+          previewUrls,
+          status: 'idle',
+          progress: 0,
+          summary: null,
+          diagnosis: null,
+          houseMeta: null,
+          error: null,
+        }
+      }),
+    )
+
+    void runAnalysis(rowId, files)
+  }
+
+  function addRow() {
+    setRows((prev) => (prev.length >= MAX_ROWS ? prev : [...prev, createRow()]))
+  }
+
+  const completedCount = rows.filter((row) => row.status === 'done').length
+
+  return (
+    <section className="panel analyze-panel">
+      <div className="panel-header">
+        <span className="step-badge">STEP 1</span>
+        <h2>빈집 사진 업로드</h2>
+        <p>
+          빈집 3채의 사진을 올리면 AI가 분석합니다. ({completedCount}/{MAX_ROWS} 완료)
+        </p>
+      </div>
+
+      <div className="upload-rows">
+        {rows.map((row, index) => (
+          <UploadRowItem
+            key={row.id}
+            row={row}
+            index={index}
+            onFiles={(files) => handleFiles(row.id, files)}
+          />
+        ))}
+      </div>
+
+      {rows.length < MAX_ROWS && (
+        <button type="button" className="btn-add-row" onClick={addRow} aria-label="빈집 추가">
+          +
+        </button>
+      )}
+    </section>
+  )
+}
+
+function UploadRowItem({
+  row,
+  index,
+  onFiles,
+}: {
+  row: UploadRow
+  index: number
+  onFiles: (files: FileList | null) => void
+}) {
+  const inputId = useId()
+
+  return (
+    <div className="upload-row">
+      <div className="upload-row-label">빈집 {index + 1}</div>
+
+      <label htmlFor={inputId} className="upload-box">
+        <input
+          id={inputId}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          multiple
+          className="upload-input"
+          onChange={(e) => {
+            onFiles(e.target.files)
+            e.target.value = ''
+          }}
+        />
+        {row.previewUrls[0] ? (
+          <img src={row.previewUrls[0]} alt={`빈집 ${index + 1} 미리보기`} className="upload-thumb" />
+        ) : (
+          <span className="upload-placeholder">업로드</span>
+        )}
+        {row.files.length > 1 && (
+          <span className="upload-count">+{row.files.length - 1}</span>
+        )}
+      </label>
+
+      <div className="analyze-result-box">
+        {row.status === 'idle' && !row.summary && (
+          <p className="analyze-result-empty">사진을 올리면 분석 내용이 표시됩니다</p>
+        )}
+        {row.status === 'analyzing' && (
+          <div className="analyze-progress">
+            <p className="analyze-progress-label">Gemini 분석 중…</p>
+            <div
+              className="analyze-progress-bar"
+              role="progressbar"
+              aria-valuenow={Math.round(row.progress)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label={`빈집 ${index + 1} AI 분석 진행률`}
+            >
+              <div
+                className="analyze-progress-fill"
+                style={{ transform: `scaleX(${Math.min(1, row.progress / 100)})` }}
+              />
+            </div>
+            <span className="analyze-progress-pct">{Math.round(row.progress)}%</span>
+          </div>
+        )}
+        {row.status === 'done' && row.summary && (
+          <p className="analyze-result-text">{row.summary}</p>
+        )}
+        {row.status === 'error' && <p className="analyze-result-error">{row.error}</p>}
+      </div>
+    </div>
+  )
+}

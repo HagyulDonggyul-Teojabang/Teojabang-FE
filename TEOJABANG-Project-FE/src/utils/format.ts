@@ -1,4 +1,4 @@
-import type { DiagnosisStatus } from '../types'
+import type { DiagnosisItem, DiagnosisStatus } from '../types'
 
 export const STATUS_LABEL: Record<DiagnosisStatus, string> = {
   good: '양호',
@@ -15,4 +15,10 @@ export function formatWon(amount: number): string {
     return `${Math.round(amount / 10000).toLocaleString()}만원`
   }
   return `${amount.toLocaleString()}원`
+}
+
+export function formatDiagnosisSummary(diagnosis: DiagnosisItem[]): string {
+  return diagnosis
+    .map((item) => `${item.category} ${STATUS_LABEL[item.status]}`)
+    .join(' · ')
 }
