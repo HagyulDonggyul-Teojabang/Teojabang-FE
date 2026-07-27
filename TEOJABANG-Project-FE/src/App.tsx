@@ -12,6 +12,7 @@ import { fetchHouses } from './utils/houseApi'
 import { hasValidAiDiagnosis } from './utils/format'
 import { rankHouses } from './utils/scoring'
 import { saveVisitApplication } from './utils/visitStorage'
+import { submitVisitApplication } from './utils/visitApi'
 
 const STEPS: { key: AppStep; label: string }[] = [
   { key: 'conditions', label: '조건 입력' },
@@ -29,6 +30,8 @@ export default function App() {
   const [analyzeKey, setAnalyzeKey] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [application, setApplication] = useState<VisitApplication | null>(null)
+  const [visitSubmitting, setVisitSubmitting] = useState(false)
+  const [visitSubmitError, setVisitSubmitError] = useState<string | null>(null)
   const [isAdminMode, setIsAdminMode] = useState(false)
 
   useEffect(() => {
@@ -77,11 +80,22 @@ export default function App() {
     setStep('ranking')
   }
 
-  function handleVisitSubmit(data: Omit<VisitApplication, 'submittedAt'>) {
+  async function handleVisitSubmit(data: Omit<VisitApplication, 'submittedAt'>) {
     const full: VisitApplication = { ...data, submittedAt: new Date().toISOString() }
-    saveVisitApplication(full)
-    setApplication(full)
-    setStep('complete')
+    setVisitSubmitting(true)
+    setVisitSubmitError(null)
+    try {
+      await submitVisitApplication(full)
+      saveVisitApplication(full)
+      setApplication(full)
+      setStep('complete')
+    } catch (err) {
+      setVisitSubmitError(
+        err instanceof Error ? err.message : '방문 신청 접수에 실패했습니다',
+      )
+    } finally {
+      setVisitSubmitting(false)
+    }
   }
 
   function handleRestart() {
@@ -89,6 +103,7 @@ export default function App() {
     setConditions(null)
     setSelectedId(null)
     setApplication(null)
+    setVisitSubmitError(null)
     setHouses([])
     setHousesReady(false)
     setHousesLoading(false)
@@ -142,8 +157,21 @@ export default function App() {
       <main className="app-main">
         {step === 'conditions' && (
           <>
-            {isAdminMode &&
-              (housesLoading ? (
+            <div
+              className={`step-view${isAdminMode ? ' step-view--hidden' : ''}`}
+              aria-hidden={isAdminMode}
+            >
+              <ConditionForm
+                initial={conditions ?? undefined}
+                housesReady={housesReady}
+                onSubmit={handleConditionsSubmit}
+              />
+            </div>
+            <div
+              className={`step-view${!isAdminMode ? ' step-view--hidden' : ''}`}
+              aria-hidden={!isAdminMode}
+            >
+              {housesLoading ? (
                 <p className="analyze-result-empty">저장된 빈집 불러오는 중…</p>
               ) : (
                 <HousePhotoAnalyze
@@ -152,14 +180,8 @@ export default function App() {
                   onHousesChange={setHouses}
                   onReadyChange={setHousesReady}
                 />
-              ))}
-            {!isAdminMode && (
-              <ConditionForm
-                initial={conditions ?? undefined}
-                housesReady={housesReady}
-                onSubmit={handleConditionsSubmit}
-              />
-            )}
+              )}
+            </div>
           </>
         )}
 
@@ -188,6 +210,8 @@ export default function App() {
             house={selectedHouse}
             onSubmit={handleVisitSubmit}
             onBack={() => setStep('cost')}
+            submitting={visitSubmitting}
+            submitError={visitSubmitError}
           />
         )}
 

@@ -297,6 +297,10 @@ button {
   flex: 1;
 }
 
+.step-view--hidden {
+  display: none;
+}
+
 .app-footer {
   text-align: center;
   font-size: 0.75rem;
@@ -1653,7 +1657,8 @@ button {
   text-align: left;
 }
 
-.analyze-result-error {
+.analyze-result-error,
+.form-error {
   color: var(--danger);
   font-size: 0.9rem;
 }
