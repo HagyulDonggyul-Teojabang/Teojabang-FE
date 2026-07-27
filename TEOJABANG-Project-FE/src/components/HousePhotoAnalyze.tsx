@@ -1,26 +1,31 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { DiagnosisItem, House } from '../types'
-import { buildHouseFromUpload, type InferredHouseMeta } from '../utils/buildHouseFromUpload'
+import { buildHouseFromUpload, type InferredHouseFlags } from '../utils/buildHouseFromUpload'
 import { formatDiagnosisSummary } from '../utils/format'
-import { analyzeHouseImages } from '../utils/geminiAnalyze'
+import { ANALYZE_MAX_PHOTOS, analyzeHouseImages } from '../utils/geminiAnalyze'
 
 const MAX_ROWS = 3
 const PROGRESS_CAP = 90
 const COMPLETE_ANIM_MS = 500
+const STAGGER_MS = 2_000
 
-const ESTIMATE_BASE_MS = 12_000
-const ESTIMATE_PER_IMAGE_MS = 3_000
-const ESTIMATE_PER_MB_MS = 2_000
+const ESTIMATE_BASE_MS = 8_000
+const ESTIMATE_PER_IMAGE_MS = 2_000
+const ESTIMATE_PER_MB_MS = 800
 
 function estimateAnalysisMs(files: File[]): number {
-  const totalMb = files.reduce((sum, file) => sum + file.size, 0) / (1024 * 1024)
-  return ESTIMATE_BASE_MS + files.length * ESTIMATE_PER_IMAGE_MS + totalMb * ESTIMATE_PER_MB_MS
+  const analyzeFiles = files.slice(0, ANALYZE_MAX_PHOTOS)
+  const totalMb = analyzeFiles.reduce((sum, file) => sum + file.size, 0) / (1024 * 1024)
+  return ESTIMATE_BASE_MS + analyzeFiles.length * ESTIMATE_PER_IMAGE_MS + totalMb * ESTIMATE_PER_MB_MS
 }
 
-/** 예상 시간 기준 ease-out — 0%에서부터 끊김 없이 서서히 가속 */
 function progressTarget(elapsedMs: number, estimatedMs: number): number {
   const tau = estimatedMs / 2.3
   return PROGRESS_CAP * (1 - Math.exp(-elapsedMs / tau))
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 type RowStatus = 'idle' | 'analyzing' | 'done' | 'error'
@@ -33,7 +38,7 @@ interface UploadRow {
   progress: number
   summary: string | null
   diagnosis: DiagnosisItem[] | null
-  houseMeta: InferredHouseMeta | null
+  flags: InferredHouseFlags | null
   error: string | null
 }
 
@@ -46,7 +51,7 @@ function createRow(): UploadRow {
     progress: 0,
     summary: null,
     diagnosis: null,
-    houseMeta: null,
+    flags: null,
     error: null,
   }
 }
@@ -58,8 +63,17 @@ interface HousePhotoAnalyzeProps {
 
 export default function HousePhotoAnalyze({ onHousesChange, onReadyChange }: HousePhotoAnalyzeProps) {
   const [rows, setRows] = useState<UploadRow[]>([createRow()])
+  const [isBatchRunning, setIsBatchRunning] = useState(false)
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null)
+
+  const rowsRef = useRef(rows)
+  rowsRef.current = rows
+
   const progressControllers = useRef<Map<string, { cancel: () => void }>>(new Map())
   const displayProgressRef = useRef<Map<string, number>>(new Map())
+
+  const isLocked =
+    isBatchRunning || rows.some((row) => row.status === 'analyzing')
 
   const stopProgress = useCallback((rowId: string) => {
     const controller = progressControllers.current.get(rowId)
@@ -83,7 +97,7 @@ export default function HousePhotoAnalyze({ onHousesChange, onReadyChange }: Hou
       nextRows.forEach((row, index) => {
         if (row.status === 'done' && row.diagnosis && row.previewUrls[0]) {
           houses.push(
-            buildHouseFromUpload(index, row.diagnosis, row.previewUrls[0], row.houseMeta ?? {}),
+            buildHouseFromUpload(index, row.diagnosis, row.previewUrls[0], row.flags ?? {}),
           )
         }
       })
@@ -174,7 +188,7 @@ export default function HousePhotoAnalyze({ onHousesChange, onReadyChange }: Hou
     })
   }
 
-  async function runAnalysis(rowId: string, files: File[]) {
+  async function runAnalysis(rowId: string, files: File[]): Promise<void> {
     displayProgressRef.current.set(rowId, 0)
     setRows((prev) =>
       prev.map((row) =>
@@ -186,7 +200,7 @@ export default function HousePhotoAnalyze({ onHousesChange, onReadyChange }: Hou
     startProgress(rowId, files)
 
     try {
-      const { diagnosis, summary, houseMeta } = await analyzeHouseImages(files)
+      const { diagnosis, summary, flags } = await analyzeHouseImages(files)
       stopProgress(rowId)
       await animateProgressTo100(rowId)
       progressControllers.current.delete(rowId)
@@ -200,7 +214,7 @@ export default function HousePhotoAnalyze({ onHousesChange, onReadyChange }: Hou
                 progress: 100,
                 diagnosis,
                 summary: summary || formatDiagnosisSummary(diagnosis),
-                houseMeta: houseMeta ?? null,
+                flags: flags ?? null,
                 error: null,
               }
             : row,
@@ -225,7 +239,7 @@ export default function HousePhotoAnalyze({ onHousesChange, onReadyChange }: Hou
   }
 
   function handleFiles(rowId: string, fileList: FileList | null) {
-    if (!fileList?.length) return
+    if (!fileList?.length || isLocked) return
 
     stopProgress(rowId)
     const files = Array.from(fileList).slice(0, 8)
@@ -243,19 +257,57 @@ export default function HousePhotoAnalyze({ onHousesChange, onReadyChange }: Hou
           progress: 0,
           summary: null,
           diagnosis: null,
-          houseMeta: null,
+          flags: null,
           error: null,
         }
       }),
     )
+  }
 
-    void runAnalysis(rowId, files)
+  async function handleAnalyzeAll() {
+    if (isLocked) return
+
+    const targets = rowsRef.current.filter(
+      (row) => row.files.length > 0 && row.status !== 'analyzing',
+    )
+    if (targets.length === 0) return
+
+    setIsBatchRunning(true)
+    setBatchProgress({ current: 1, total: targets.length })
+
+    try {
+      for (let i = 0; i < targets.length; i++) {
+        if (i > 0) {
+          await sleep(STAGGER_MS)
+          setBatchProgress({ current: i + 1, total: targets.length })
+        }
+
+        const row = rowsRef.current.find((item) => item.id === targets[i].id)
+        if (!row?.files.length) continue
+
+        await runAnalysis(row.id, row.files)
+      }
+    } finally {
+      setIsBatchRunning(false)
+      setBatchProgress(null)
+    }
+  }
+
+  function handleAnalyzeOne(rowId: string) {
+    if (isLocked) return
+
+    const row = rowsRef.current.find((item) => item.id === rowId)
+    if (!row?.files.length || row.status === 'analyzing') return
+
+    void runAnalysis(rowId, row.files)
   }
 
   function addRow() {
+    if (isLocked) return
     setRows((prev) => (prev.length >= MAX_ROWS ? prev : [...prev, createRow()]))
   }
 
+  const uploadedCount = rows.filter((row) => row.files.length > 0).length
   const completedCount = rows.filter((row) => row.status === 'done').length
 
   return (
@@ -264,9 +316,16 @@ export default function HousePhotoAnalyze({ onHousesChange, onReadyChange }: Hou
         <span className="step-badge">STEP 1</span>
         <h2>빈집 사진 업로드</h2>
         <p>
-          빈집 3채의 사진을 올리면 AI가 분석합니다. ({completedCount}/{MAX_ROWS} 완료)
+          사진을 올린 뒤 전체 분석을 실행하세요. 대표 사진 1~2장씩 · 순차 분석 ({completedCount}/
+          {MAX_ROWS} 완료)
         </p>
       </div>
+
+      {batchProgress && (
+        <p className="analyze-batch-banner" role="status">
+          빈집 {batchProgress.current}/{batchProgress.total} 분석 중…
+        </p>
+      )}
 
       <div className="upload-rows">
         {rows.map((row, index) => (
@@ -274,13 +333,32 @@ export default function HousePhotoAnalyze({ onHousesChange, onReadyChange }: Hou
             key={row.id}
             row={row}
             index={index}
+            uploadLocked={isLocked}
             onFiles={(files) => handleFiles(row.id, files)}
+            onAnalyzeOne={() => handleAnalyzeOne(row.id)}
           />
         ))}
       </div>
 
+      <div className="analyze-actions">
+        <button
+          type="button"
+          className="btn-analyze-all"
+          disabled={uploadedCount === 0 || isLocked}
+          onClick={() => void handleAnalyzeAll()}
+        >
+          전체 분석 ({uploadedCount}/{rows.length})
+        </button>
+      </div>
+
       {rows.length < MAX_ROWS && (
-        <button type="button" className="btn-add-row" onClick={addRow} aria-label="빈집 추가">
+        <button
+          type="button"
+          className="btn-add-row"
+          onClick={addRow}
+          disabled={isLocked}
+          aria-label="빈집 추가"
+        >
           +
         </button>
       )}
@@ -291,25 +369,36 @@ export default function HousePhotoAnalyze({ onHousesChange, onReadyChange }: Hou
 function UploadRowItem({
   row,
   index,
+  uploadLocked,
   onFiles,
+  onAnalyzeOne,
 }: {
   row: UploadRow
   index: number
+  uploadLocked: boolean
   onFiles: (files: FileList | null) => void
+  onAnalyzeOne: () => void
 }) {
   const inputId = useId()
+  const hasPhotos = row.files.length > 0
+  const canAnalyzeOne =
+    hasPhotos && !uploadLocked && row.status !== 'analyzing'
 
   return (
     <div className="upload-row">
       <div className="upload-row-label">빈집 {index + 1}</div>
 
-      <label htmlFor={inputId} className="upload-box">
+      <label
+        htmlFor={inputId}
+        className={`upload-box${uploadLocked ? ' upload-box-locked' : ''}`}
+      >
         <input
           id={inputId}
           type="file"
           accept="image/jpeg,image/png,image/webp"
           multiple
           className="upload-input"
+          disabled={uploadLocked}
           onChange={(e) => {
             onFiles(e.target.files)
             e.target.value = ''
@@ -323,11 +412,25 @@ function UploadRowItem({
         {row.files.length > 1 && (
           <span className="upload-count">+{row.files.length - 1}</span>
         )}
+        {row.files.length > ANALYZE_MAX_PHOTOS && (
+          <span className="upload-analyze-hint">분석 {ANALYZE_MAX_PHOTOS}장</span>
+        )}
       </label>
 
       <div className="analyze-result-box">
         {row.status === 'idle' && !row.summary && (
-          <p className="analyze-result-empty">사진을 올리면 분석 내용이 표시됩니다</p>
+          <div className="analyze-result-idle">
+            <p className="analyze-result-empty">
+              {hasPhotos
+                ? '분석 준비 완료 · 전체 분석 또는 이 빈집만 분석'
+                : '사진을 올린 뒤 분석을 실행하세요'}
+            </p>
+            {canAnalyzeOne && (
+              <button type="button" className="btn-analyze-row" onClick={onAnalyzeOne}>
+                이 빈집만 분석
+              </button>
+            )}
+          </div>
         )}
         {row.status === 'analyzing' && (
           <div className="analyze-progress">
@@ -349,9 +452,25 @@ function UploadRowItem({
           </div>
         )}
         {row.status === 'done' && row.summary && (
-          <p className="analyze-result-text">{row.summary}</p>
+          <div className="analyze-result-idle">
+            <p className="analyze-result-text">{row.summary}</p>
+            {canAnalyzeOne && (
+              <button type="button" className="btn-analyze-row" onClick={onAnalyzeOne}>
+                다시 분석
+              </button>
+            )}
+          </div>
         )}
-        {row.status === 'error' && <p className="analyze-result-error">{row.error}</p>}
+        {row.status === 'error' && (
+          <div className="analyze-result-idle">
+            <p className="analyze-result-error">{row.error}</p>
+            {canAnalyzeOne && (
+              <button type="button" className="btn-analyze-row" onClick={onAnalyzeOne}>
+                다시 분석
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

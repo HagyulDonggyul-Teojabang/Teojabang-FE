@@ -3,44 +3,25 @@ import type { Plugin } from 'vite'
 
 const DIAGNOSIS_CATEGORIES = [
   '지붕',
-  '창호',
-  '난방',
   '누수',
   '곰팡이',
-  '바닥',
-  '화장실',
-  '수도·전기',
   '차량 진입',
   '창고·마당',
-  '단열·결로',
+  '수도·전기',
 ] as const
 
-const MODEL_FALLBACKS = [
-  'gemini-flash-latest',
-  'gemini-3.6-flash',
-  'gemini-2.0-flash-lite',
-  'gemini-1.5-flash',
-]
+const ANALYZE_MAX_IMAGES = 2
+const DEFAULT_MODEL = 'gemini-flash-latest'
 
-const PROMPT = `제주 농촌 빈집 내부·외부 사진을 분석하세요.
+const PROMPT = `제주 빈집 사진 분석. JSON만 출력.
 
-다음 항목 각각 diagnosis 배열에 포함:
-${DIAGNOSIS_CATEGORIES.join(', ')}
+diagnosis 6항목 각각 포함: ${DIAGNOSIS_CATEGORIES.join(', ')}
+status: good|caution|danger|onsite
+note: caution/danger/onsite만 20자 이내, good은 ""
 
-status: good(양호) | caution(주의) | danger(위험) | onsite(현장 확인 필요)
+flags(사진에서 보이는 것만): vehicleAccess, hasWarehouse, hasYard (boolean)
 
-추가로 summary(한 줄 요약, 예: "지붕 양호 · 누수 주의")와
-houseMeta(사진에서 추정 가능한 경우만):
-- region: 서귀포|제주시|성산|한림|구좌 중 하나 또는 null
-- vehicleAccess, hasWarehouse, hasYard: boolean
-- farmlandDistanceMin: number (농지까지 추정 분)
-- publicTransportScore: 1~5
-- area: ㎡ 추정
-- rent: 월 임대료 추정(원)
-- deposit: 보증금 추정(원)
-
-반드시 JSON만 출력:
-{"summary":"...","diagnosis":[{"category":"지붕","status":"good","note":"..."}],"houseMeta":{"region":"제주시","vehicleAccess":true}}`
+{"summary":"한줄요약","flags":{"vehicleAccess":true,"hasWarehouse":false,"hasYard":true},"diagnosis":[{"category":"지붕","status":"good","note":""}]}`
 
 interface AnalyzeImage {
   mimeType: string
@@ -53,22 +34,16 @@ interface DiagnosisItem {
   note: string
 }
 
-interface HouseMeta {
-  region?: string
+interface HouseFlags {
   vehicleAccess?: boolean
   hasWarehouse?: boolean
   hasYard?: boolean
-  farmlandDistanceMin?: number
-  publicTransportScore?: number
-  area?: number
-  rent?: number
-  deposit?: number
 }
 
 interface AnalyzeResult {
   diagnosis: DiagnosisItem[]
   summary: string
-  houseMeta?: HouseMeta
+  flags?: HouseFlags
 }
 
 function readBody(req: Connect.IncomingMessage): Promise<string> {
@@ -90,7 +65,8 @@ function parseJsonResponse(text: string): AnalyzeResult {
   const parsed = JSON.parse(cleaned) as {
     diagnosis?: DiagnosisItem[]
     summary?: string
-    houseMeta?: HouseMeta
+    flags?: HouseFlags
+    houseMeta?: HouseFlags
   }
   if (!Array.isArray(parsed.diagnosis)) {
     throw new Error('diagnosis 배열이 없습니다')
@@ -100,11 +76,15 @@ function parseJsonResponse(text: string): AnalyzeResult {
     if (!validStatuses.has(item.status)) {
       item.status = 'onsite'
     }
+    if (item.status === 'good') {
+      item.note = ''
+    }
   }
   const summary =
     parsed.summary ??
     parsed.diagnosis.map((d) => `${d.category} ${d.status}`).join(' · ')
-  return { diagnosis: parsed.diagnosis, summary, houseMeta: parsed.houseMeta }
+  const flags = parsed.flags ?? parsed.houseMeta
+  return { diagnosis: parsed.diagnosis, summary, flags }
 }
 
 async function callGemini(
@@ -154,34 +134,35 @@ async function callGemini(
   return parseJsonResponse(text)
 }
 
-async function analyzeWithFallback(
-  apiKey: string,
-  preferredModel: string | undefined,
-  images: AnalyzeImage[],
-): Promise<{ diagnosis: DiagnosisItem[]; summary: string; houseMeta?: HouseMeta; model: string }> {
-  const models = [
-    ...(preferredModel ? [preferredModel] : []),
-    ...MODEL_FALLBACKS.filter((m) => m !== preferredModel),
-  ]
-
-  let lastError: Error | null = null
-  for (const model of models) {
-    try {
-      const result = await callGemini(apiKey, model, images)
-      return { ...result, model }
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err))
-      const msg = lastError.message.toLowerCase()
-      const retryable =
-        msg.includes('quota') ||
-        msg.includes('429') ||
-        msg.includes('not found') ||
-        msg.includes('404') ||
-        msg.includes('unavailable')
-      if (!retryable) break
-    }
+function formatGeminiError(message: string): string {
+  const msg = message.toLowerCase()
+  if (
+    msg.includes('api key') ||
+    msg.includes('permission denied') ||
+    msg.includes('401') ||
+    msg.includes('403')
+  ) {
+    return 'Gemini API 키가 유효하지 않습니다. .env의 GEMINI_API_KEY를 확인해 주세요.'
   }
-  throw lastError ?? new Error('Gemini 분석에 실패했습니다')
+  if (msg.includes('quota') || msg.includes('429')) {
+    return 'Gemini API 사용 한도에 도달했습니다. 잠시 후 다시 시도하거나 Google AI Studio에서 quota를 확인해 주세요.'
+  }
+  return message
+}
+
+async function analyzeWithModel(
+  apiKey: string,
+  modelName: string | undefined,
+  images: AnalyzeImage[],
+): Promise<{ diagnosis: DiagnosisItem[]; summary: string; flags?: HouseFlags; model: string }> {
+  const model = modelName?.trim() || DEFAULT_MODEL
+  try {
+    const result = await callGemini(apiKey, model, images)
+    return { ...result, model }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new Error(formatGeminiError(message))
+  }
 }
 
 export function geminiAnalyzePlugin(env: Record<string, string>): Plugin {
@@ -213,14 +194,14 @@ export function geminiAnalyzePlugin(env: Record<string, string>): Plugin {
             return
           }
 
-          if (images.length > 8) {
+          if (images.length > ANALYZE_MAX_IMAGES) {
             res.statusCode = 400
             res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify({ error: '이미지는 최대 8장까지 업로드할 수 있습니다' }))
+            res.end(JSON.stringify({ error: `이미지는 최대 ${ANALYZE_MAX_IMAGES}장까지 분석할 수 있습니다` }))
             return
           }
 
-          const { diagnosis, summary, houseMeta, model } = await analyzeWithFallback(
+          const { diagnosis, summary, flags, model } = await analyzeWithModel(
             apiKey,
             env.GEMINI_MODEL,
             images,
@@ -228,7 +209,7 @@ export function geminiAnalyzePlugin(env: Record<string, string>): Plugin {
 
           res.statusCode = 200
           res.setHeader('Content-Type', 'application/json')
-          res.end(JSON.stringify({ diagnosis, summary, houseMeta, model }))
+          res.end(JSON.stringify({ diagnosis, summary, flags, model }))
         } catch (err) {
           const message = err instanceof Error ? err.message : '분석 중 오류가 발생했습니다'
           res.statusCode = 500

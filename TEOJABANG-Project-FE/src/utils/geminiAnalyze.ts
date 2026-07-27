@@ -1,5 +1,8 @@
 import type { DiagnosisItem } from '../types'
-import type { InferredHouseMeta } from './buildHouseFromUpload'
+import type { InferredHouseFlags } from './buildHouseFromUpload'
+import { compressImageForAnalysis } from './compressImage'
+
+export const ANALYZE_MAX_PHOTOS = 2
 
 export interface AnalyzeImagePayload {
   mimeType: string
@@ -9,11 +12,11 @@ export interface AnalyzeImagePayload {
 export interface AnalyzeResponse {
   diagnosis: DiagnosisItem[]
   summary: string
-  houseMeta?: InferredHouseMeta
+  flags?: InferredHouseFlags
   model: string
 }
 
-export async function fileToBase64(file: File): Promise<AnalyzeImagePayload> {
+async function fileToBase64(file: File): Promise<AnalyzeImagePayload> {
   const buffer = await file.arrayBuffer()
   const bytes = new Uint8Array(buffer)
   let binary = ''
@@ -27,7 +30,9 @@ export async function fileToBase64(file: File): Promise<AnalyzeImagePayload> {
 }
 
 export async function analyzeHouseImages(files: File[]): Promise<AnalyzeResponse> {
-  const images = await Promise.all(files.map(fileToBase64))
+  const toAnalyze = files.slice(0, ANALYZE_MAX_PHOTOS)
+  const compressed = await Promise.all(toAnalyze.map(compressImageForAnalysis))
+  const images = await Promise.all(compressed.map(fileToBase64))
 
   const res = await fetch('/api/analyze', {
     method: 'POST',

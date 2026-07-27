@@ -755,6 +755,103 @@ button {
   border-radius: 8px;
 }
 
+.upload-analyze-hint {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+
+.analyze-concurrent-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.analyze-batch-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  background: var(--primary-bg);
+  color: var(--primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.upload-box-locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.upload-box-locked .upload-input {
+  cursor: not-allowed;
+}
+
+.analyze-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.btn-analyze-all {
+  padding: 0.65rem 1.5rem;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-analyze-all:hover:not(:disabled) {
+  background: var(--primary-light);
+}
+
+.btn-analyze-all:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.analyze-result-idle {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.btn-analyze-row {
+  align-self: flex-start;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-analyze-row:hover {
+  background: var(--primary-bg);
+}
+
+.btn-add-row:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .analyze-result-box {
   display: flex;
   align-items: center;
