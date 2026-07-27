@@ -801,6 +801,8 @@ button {
 .analyze-actions {
   display: flex;
   justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
   margin-top: 1rem;
 }
 
@@ -820,6 +822,28 @@ button {
 }
 
 .btn-analyze-all:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-reset-houses {
+  padding: 0.65rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-reset-houses:hover:not(:disabled) {
+  border-color: #e57373;
+  color: #c62828;
+  background: #fff5f5;
+}
+
+.btn-reset-houses:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }

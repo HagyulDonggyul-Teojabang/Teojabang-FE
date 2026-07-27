@@ -17,6 +17,21 @@ function inferFromDiagnosis(
   return diagnosis.find((d) => d.category.includes(categoryIncludes))?.status
 }
 
+export function buildHouseRegisterMeta(index: number) {
+  return {
+    name: `업로드 빈집 ${index + 1}`,
+    region: '제주시' as Region,
+    address: '제주 (사용자 업로드 · 사진 분석)',
+    area: 70 + index * 5,
+    rent: 280000 + index * 40000,
+    deposit: 5000000 + index * 2000000,
+    vehicleAccess: false,
+    hasWarehouse: false,
+    hasYard: false,
+    publicTransportScore: 3,
+  }
+}
+
 export function buildHouseFromUpload(
   index: number,
   diagnosis: DiagnosisItem[],

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import ConditionForm from './components/ConditionForm'
 import CostReport from './components/CostReport'
 import HousePhotoAnalyze from './components/HousePhotoAnalyze'
@@ -6,6 +6,7 @@ import RankingResult from './components/RankingResult'
 import VisitApplicationForm, { VisitComplete } from './components/VisitApplication'
 import type { AppStep, House, UserConditions, VisitApplication } from './types'
 import { calculateCost } from './utils/costCalculator'
+import { fetchHouses } from './utils/houseApi'
 import { rankHouses } from './utils/scoring'
 import { saveVisitApplication } from './utils/visitStorage'
 
@@ -21,8 +22,38 @@ export default function App() {
   const [conditions, setConditions] = useState<UserConditions | null>(null)
   const [houses, setHouses] = useState<House[]>([])
   const [housesReady, setHousesReady] = useState(false)
+  const [housesLoading, setHousesLoading] = useState(true)
+  const [analyzeKey, setAnalyzeKey] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [application, setApplication] = useState<VisitApplication | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    fetchHouses()
+      .then((loaded) => {
+        if (!cancelled) {
+          setHouses(loaded)
+          setHousesReady(loaded.length >= 3)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHouses([])
+          setHousesReady(false)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHousesLoading(false)
+          setAnalyzeKey((key) => key + 1)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const ranked = useMemo(
     () => (conditions && houses.length > 0 ? rankHouses(houses, conditions) : []),
@@ -54,10 +85,22 @@ export default function App() {
   function handleRestart() {
     setStep('conditions')
     setConditions(null)
-    setHouses([])
-    setHousesReady(false)
     setSelectedId(null)
     setApplication(null)
+    setHousesLoading(true)
+    fetchHouses()
+      .then((loaded) => {
+        setHouses(loaded)
+        setHousesReady(loaded.length >= 3)
+      })
+      .catch(() => {
+        setHouses([])
+        setHousesReady(false)
+      })
+      .finally(() => {
+        setHousesLoading(false)
+        setAnalyzeKey((key) => key + 1)
+      })
   }
 
   const stepIndex = STEPS.findIndex((s) => s.key === step)
@@ -91,10 +134,16 @@ export default function App() {
       <main className="app-main">
         {step === 'conditions' && (
           <>
-            <HousePhotoAnalyze
-              onHousesChange={setHouses}
-              onReadyChange={setHousesReady}
-            />
+            {housesLoading ? (
+              <p className="analyze-result-empty">저장된 빈집 불러오는 중…</p>
+            ) : (
+              <HousePhotoAnalyze
+                key={analyzeKey}
+                initialHouses={houses}
+                onHousesChange={setHouses}
+                onReadyChange={setHousesReady}
+              />
+            )}
             <ConditionForm
               initial={conditions ?? undefined}
               housesReady={housesReady}
