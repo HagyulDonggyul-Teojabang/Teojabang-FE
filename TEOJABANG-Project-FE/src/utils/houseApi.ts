@@ -1,4 +1,4 @@
-import type { House } from '../types'
+import type { House, HouseRegisterInput } from '../types'
 import { buildHouseRegisterMeta } from './buildHouseFromUpload'
 import { API_BASE, parseApiError, readJsonResponse } from './apiClient'
 
@@ -22,6 +22,7 @@ function normalizeHouse(raw: ApiHouse, index: number): House {
     ...raw,
     imageUrl: resolveAssetUrl(raw.imageUrl),
     farmlandDistanceMin: raw.farmlandDistanceMin ?? 10 + index * 3,
+    otherFeatures: raw.otherFeatures?.trim() || undefined,
   }
 }
 
@@ -40,8 +41,12 @@ export async function fetchHouses(): Promise<House[]> {
   return data.map((house, index) => normalizeHouse(house, index))
 }
 
-export async function registerHouse(files: File[], slotIndex: number): Promise<House> {
-  const meta = buildHouseRegisterMeta(slotIndex)
+export async function registerHouse(
+  files: File[],
+  slotIndex: number,
+  input: HouseRegisterInput,
+): Promise<House> {
+  const meta = buildHouseRegisterMeta(slotIndex, input)
   const formData = new FormData()
 
   formData.append('name', meta.name)
@@ -54,6 +59,9 @@ export async function registerHouse(files: File[], slotIndex: number): Promise<H
   formData.append('hasWarehouse', String(meta.hasWarehouse))
   formData.append('hasYard', String(meta.hasYard))
   formData.append('publicTransportScore', String(meta.publicTransportScore))
+  if (meta.otherFeatures) {
+    formData.append('otherFeatures', meta.otherFeatures)
+  }
 
   for (const file of files) {
     formData.append('files', file)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import type { DiagnosisItem, House } from '../types'
+import type { DiagnosisItem, House, HouseRegisterInput } from '../types'
 import { formatDiagnosisSummary } from '../utils/format'
 import { registerHouse, resetAllHouses, resolveAssetUrl } from '../utils/houseApi'
 
@@ -30,6 +30,15 @@ type RowStatus = 'idle' | 'analyzing' | 'done' | 'error'
 
 interface UploadRow {
   id: string
+  name: string
+  address: string
+  deposit: number
+  rentYearly: number
+  vehicleAccess: boolean
+  hasWarehouse: boolean
+  hasYard: boolean
+  otherEnabled: boolean
+  otherFeatures: string
   files: File[]
   previewUrls: string[]
   status: RowStatus
@@ -43,6 +52,15 @@ interface UploadRow {
 function createRow(): UploadRow {
   return {
     id: crypto.randomUUID(),
+    name: '',
+    address: '',
+    deposit: 10_000_000,
+    rentYearly: 4_200_000,
+    vehicleAccess: false,
+    hasWarehouse: false,
+    hasYard: false,
+    otherEnabled: false,
+    otherFeatures: '',
     files: [],
     previewUrls: [],
     status: 'idle',
@@ -57,6 +75,15 @@ function createRow(): UploadRow {
 function rowFromHouse(house: House): UploadRow {
   return {
     id: house.id,
+    name: house.name,
+    address: house.address,
+    deposit: house.deposit,
+    rentYearly: house.rent * 12,
+    vehicleAccess: house.vehicleAccess,
+    hasWarehouse: house.hasWarehouse,
+    hasYard: house.hasYard,
+    otherEnabled: Boolean(house.otherFeatures),
+    otherFeatures: house.otherFeatures ?? '',
     files: [],
     previewUrls: [resolveAssetUrl(house.imageUrl)],
     status: 'done',
@@ -68,12 +95,48 @@ function rowFromHouse(house: House): UploadRow {
   }
 }
 
+function rowToRegisterInput(row: UploadRow): HouseRegisterInput {
+  return {
+    name: row.name.trim(),
+    address: row.address.trim(),
+    deposit: row.deposit,
+    rentYearly: row.rentYearly,
+    vehicleAccess: row.vehicleAccess,
+    hasWarehouse: row.hasWarehouse,
+    hasYard: row.hasYard,
+    otherFeatures: row.otherEnabled ? row.otherFeatures.trim() : undefined,
+  }
+}
+
 function initialRows(houses: House[]): UploadRow[] {
   const rows = houses.map(rowFromHouse)
-  if (rows.length < MAX_ROWS) {
+  while (rows.length < MAX_ROWS) {
     rows.push(createRow())
   }
-  return rows.length > 0 ? rows : [createRow()]
+  return rows
+}
+
+function isRowReadyForAnalysis(row: UploadRow): boolean {
+  return (
+    row.files.length > 0 &&
+    row.name.trim() !== '' &&
+    row.address.trim() !== '' &&
+    row.deposit > 0 &&
+    row.rentYearly > 0 &&
+    (!row.otherEnabled || row.otherFeatures.trim() !== '') &&
+    !row.savedHouse &&
+    row.status !== 'analyzing'
+  )
+}
+
+function metaValidationError(row: UploadRow): string | null {
+  if (row.files.length === 0) return null
+  if (!row.name.trim()) return '집 이름을 입력해 주세요'
+  if (!row.address.trim()) return '주소를 입력해 주세요'
+  if (row.deposit <= 0) return '보증금을 입력해 주세요'
+  if (row.rentYearly <= 0) return '연간 임대료를 입력해 주세요'
+  if (row.otherEnabled && !row.otherFeatures.trim()) return '기타 확인 조건을 입력해 주세요'
+  return null
 }
 
 interface HousePhotoAnalyzeProps {
@@ -208,7 +271,7 @@ export default function HousePhotoAnalyze({
     })
   }
 
-  async function runAnalysis(rowId: string, files: File[], slotIndex: number): Promise<void> {
+  async function runAnalysis(rowId: string, files: File[], slotIndex: number, input: HouseRegisterInput): Promise<void> {
     displayProgressRef.current.set(rowId, 0)
     setRows((prev) =>
       prev.map((row) =>
@@ -220,7 +283,7 @@ export default function HousePhotoAnalyze({
     startProgress(rowId, files)
 
     try {
-      const house = await registerHouse(files, slotIndex)
+      const house = await registerHouse(files, slotIndex, input)
       stopProgress(rowId)
       await animateProgressTo100(rowId)
       progressControllers.current.delete(rowId)
@@ -232,6 +295,15 @@ export default function HousePhotoAnalyze({
                 ...row,
                 status: 'done',
                 progress: 100,
+                name: house.name,
+                address: house.address,
+                deposit: house.deposit,
+                rentYearly: house.rent * 12,
+                vehicleAccess: house.vehicleAccess,
+                hasWarehouse: house.hasWarehouse,
+                hasYard: house.hasYard,
+                otherEnabled: Boolean(house.otherFeatures),
+                otherFeatures: house.otherFeatures ?? '',
                 diagnosis: house.diagnosis,
                 summary: formatDiagnosisSummary(house.diagnosis),
                 previewUrls: [resolveAssetUrl(house.imageUrl)],
@@ -294,12 +366,21 @@ export default function HousePhotoAnalyze({
     return nextRows.filter((row) => row.savedHouse !== null).length
   }
 
+  function updateRow(rowId: string, patch: Partial<UploadRow>) {
+    if (isLocked) return
+
+    const row = rowsRef.current.find((item) => item.id === rowId)
+    if (row?.savedHouse) return
+
+    setRows((prev) =>
+      prev.map((item) => (item.id === rowId ? { ...item, ...patch, error: null } : item)),
+    )
+  }
+
   async function handleAnalyzeAll() {
     if (isLocked) return
 
-    const targets = rowsRef.current.filter(
-      (row) => row.files.length > 0 && !row.savedHouse && row.status !== 'analyzing',
-    )
+    const targets = rowsRef.current.filter(isRowReadyForAnalysis)
     if (targets.length === 0) return
 
     setIsBatchRunning(true)
@@ -313,10 +394,10 @@ export default function HousePhotoAnalyze({
         }
 
         const row = rowsRef.current.find((item) => item.id === targets[i].id)
-        if (!row?.files.length || row.savedHouse) continue
+        if (!row || !isRowReadyForAnalysis(row)) continue
 
         const slotIndex = countSavedHouses(rowsRef.current)
-        await runAnalysis(row.id, row.files, slotIndex)
+        await runAnalysis(row.id, row.files, slotIndex, rowToRegisterInput(row))
       }
     } finally {
       setIsBatchRunning(false)
@@ -330,8 +411,16 @@ export default function HousePhotoAnalyze({
     const row = rowsRef.current.find((item) => item.id === rowId)
     if (!row?.files.length || row.savedHouse || row.status === 'analyzing') return
 
+    const validationError = metaValidationError(row)
+    if (validationError) {
+      setRows((prev) =>
+        prev.map((item) => (item.id === rowId ? { ...item, error: validationError } : item)),
+      )
+      return
+    }
+
     const slotIndex = countSavedHouses(rowsRef.current)
-    void runAnalysis(rowId, row.files, slotIndex)
+    void runAnalysis(rowId, row.files, slotIndex, rowToRegisterInput(row))
   }
 
   function addRow() {
@@ -367,7 +456,7 @@ export default function HousePhotoAnalyze({
     try {
       await resetAllHouses()
       clearRowPreviews(rowsRef.current)
-      setRows([createRow()])
+      setRows(initialRows([]))
     } catch (err) {
       window.alert(err instanceof Error ? err.message : '초기화에 실패했습니다')
     } finally {
@@ -376,6 +465,7 @@ export default function HousePhotoAnalyze({
   }
 
   const uploadedCount = rows.filter((row) => row.files.length > 0 || row.savedHouse).length
+  const readyCount = rows.filter(isRowReadyForAnalysis).length
   const completedCount = rows.filter((row) => row.savedHouse !== null).length
 
   return (
@@ -384,7 +474,7 @@ export default function HousePhotoAnalyze({
         <span className="step-badge">STEP 1</span>
         <h2>빈집 사진 업로드</h2>
         <p>
-          사진을 올린 뒤 전체 분석을 실행하세요. 분석 완료 시 서버에 저장됩니다 · ({completedCount}/
+          사진과 함께 집 정보·확인한 조건·임대 조건을 입력한 뒤 분석하세요 · ({completedCount}/
           {MAX_ROWS} 완료)
         </p>
       </div>
@@ -403,6 +493,7 @@ export default function HousePhotoAnalyze({
             index={index}
             uploadLocked={isLocked}
             onFiles={(files) => handleFiles(row.id, files)}
+            onRowUpdate={(patch) => updateRow(row.id, patch)}
             onAnalyzeOne={() => handleAnalyzeOne(row.id)}
           />
         ))}
@@ -412,10 +503,10 @@ export default function HousePhotoAnalyze({
         <button
           type="button"
           className="btn-analyze-all"
-          disabled={uploadedCount === 0 || isLocked}
+          disabled={readyCount === 0 || isLocked}
           onClick={() => void handleAnalyzeAll()}
         >
-          전체 분석·저장 ({uploadedCount}/{rows.length})
+          전체 분석·저장 ({readyCount}/{rows.length})
         </button>
         <button
           type="button"
@@ -447,67 +538,183 @@ function UploadRowItem({
   index,
   uploadLocked,
   onFiles,
+  onRowUpdate,
   onAnalyzeOne,
 }: {
   row: UploadRow
   index: number
   uploadLocked: boolean
   onFiles: (files: FileList | null) => void
+  onRowUpdate: (patch: Partial<UploadRow>) => void
   onAnalyzeOne: () => void
 }) {
   const inputId = useId()
+  const nameId = useId()
+  const addressId = useId()
+  const depositId = useId()
+  const rentYearlyId = useId()
+  const otherId = useId()
   const isSaved = row.savedHouse !== null
   const hasPhotos = row.files.length > 0 || isSaved
-  const canAnalyzeOne =
-    row.files.length > 0 && !isSaved && !uploadLocked && row.status !== 'analyzing'
+  const canAnalyzeOne = isRowReadyForAnalysis(row) && !uploadLocked
+  const validationHint = metaValidationError(row)
+  const disabled = uploadLocked || isSaved
 
   return (
-    <div className="upload-row">
-      <div className="upload-row-label">빈집 {index + 1}</div>
+    <article className="upload-row-card">
+      <div className="upload-row-header">빈집 {index + 1}</div>
 
-      <label
-        htmlFor={inputId}
-        className={`upload-box${uploadLocked || isSaved ? ' upload-box-locked' : ''}`}
-      >
-        <input
-          id={inputId}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          multiple
-          className="upload-input"
-          disabled={uploadLocked || isSaved}
-          onChange={(e) => {
-            onFiles(e.target.files)
-            e.target.value = ''
-          }}
-        />
-        {row.previewUrls[0] ? (
-          <img src={row.previewUrls[0]} alt={`빈집 ${index + 1} 미리보기`} className="upload-thumb" />
-        ) : (
-          <span className="upload-placeholder">업로드</span>
-        )}
-        {row.files.length > 1 && (
-          <span className="upload-count">+{row.files.length - 1}</span>
-        )}
-      </label>
+      <div className="upload-row-body">
+        <label
+          htmlFor={inputId}
+          className={`upload-box${disabled ? ' upload-box-locked' : ''}`}
+        >
+          <input
+            id={inputId}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            className="upload-input"
+            disabled={disabled}
+            onChange={(e) => {
+              onFiles(e.target.files)
+              e.target.value = ''
+            }}
+          />
+          {row.previewUrls[0] ? (
+            <img src={row.previewUrls[0]} alt={`빈집 ${index + 1} 미리보기`} className="upload-thumb" />
+          ) : (
+            <span className="upload-placeholder">사진 업로드</span>
+          )}
+          {row.files.length > 1 && (
+            <span className="upload-count">+{row.files.length - 1}</span>
+          )}
+        </label>
 
-      <div className="analyze-result-box">
-        {row.status === 'idle' && !row.summary && (
-          <div className="analyze-result-idle">
-            <p className="analyze-result-empty">
-              {isSaved
-                ? '저장 완료 · 새로고침해도 유지됩니다'
-                : hasPhotos
-                  ? '분석 준비 완료 · 전체 분석 또는 이 빈집만 분석'
-                  : '사진을 올린 뒤 분석을 실행하세요'}
-            </p>
-            {canAnalyzeOne && (
-              <button type="button" className="btn-analyze-row" onClick={onAnalyzeOne}>
-                이 빈집만 분석
-              </button>
-            )}
+        <div className="upload-row-form">
+          <div className="upload-meta-fields">
+            <label htmlFor={nameId}>
+              집 이름
+              <input
+                id={nameId}
+                type="text"
+                value={row.name}
+                placeholder="예: 서귀포 감귤밭 인근 단독주택"
+                disabled={disabled}
+                onChange={(e) => onRowUpdate({ name: e.target.value })}
+              />
+            </label>
+            <label htmlFor={addressId}>
+              주소
+              <input
+                id={addressId}
+                type="text"
+                value={row.address}
+                placeholder="예: 제주 서귀포시 남원읍 신례리 123-4"
+                disabled={disabled}
+                onChange={(e) => onRowUpdate({ address: e.target.value })}
+              />
+            </label>
+            <label htmlFor={depositId}>
+              보증금 (원)
+              <input
+                id={depositId}
+                type="number"
+                min={0}
+                step={1000000}
+                value={row.deposit}
+                disabled={disabled}
+                onChange={(e) => onRowUpdate({ deposit: Number(e.target.value) })}
+              />
+            </label>
+            <label htmlFor={rentYearlyId}>
+              연간 임대료 (원)
+              <input
+                id={rentYearlyId}
+                type="number"
+                min={0}
+                step={100000}
+                value={row.rentYearly}
+                disabled={disabled}
+                onChange={(e) => onRowUpdate({ rentYearly: Number(e.target.value) })}
+              />
+            </label>
           </div>
-        )}
+
+          <fieldset className="upload-verified-conditions" disabled={disabled}>
+            <legend>확인한 조건</legend>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={row.vehicleAccess}
+                onChange={(e) => onRowUpdate({ vehicleAccess: e.target.checked })}
+              />
+              1톤 트럭·농기계 진입 가능
+            </label>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={row.hasWarehouse}
+                onChange={(e) => onRowUpdate({ hasWarehouse: e.target.checked })}
+              />
+              창고 있음
+            </label>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={row.hasYard}
+                onChange={(e) => onRowUpdate({ hasYard: e.target.checked })}
+              />
+              마당 있음
+            </label>
+            <label className="checkbox upload-other-toggle">
+              <input
+                type="checkbox"
+                checked={row.otherEnabled}
+                onChange={(e) =>
+                  onRowUpdate({
+                    otherEnabled: e.target.checked,
+                    otherFeatures: e.target.checked ? row.otherFeatures : '',
+                  })
+                }
+              />
+              기타
+            </label>
+            {row.otherEnabled && (
+              <input
+                id={otherId}
+                type="text"
+                className="upload-other-input"
+                value={row.otherFeatures}
+                placeholder="예: 대형 창고 2동, 온수 보일러"
+                disabled={disabled}
+                onChange={(e) => onRowUpdate({ otherFeatures: e.target.value })}
+              />
+            )}
+          </fieldset>
+        </div>
+      </div>
+
+      <div className="upload-row-footer">
+        <div className="analyze-result-box">
+          {row.status === 'idle' && !row.summary && (
+            <div className="analyze-result-idle">
+              <p className="analyze-result-empty">
+                {isSaved
+                  ? '저장 완료 · 새로고침해도 유지됩니다'
+                  : hasPhotos
+                    ? validationHint
+                      ? validationHint
+                      : '분석 준비 완료 · 전체 분석 또는 이 빈집만 분석'
+                    : '사진·집 정보·확인한 조건을 입력한 뒤 분석을 실행하세요'}
+              </p>
+              {canAnalyzeOne && (
+                <button type="button" className="btn-analyze-row" onClick={onAnalyzeOne}>
+                  이 빈집만 분석
+                </button>
+              )}
+            </div>
+          )}
         {row.status === 'analyzing' && (
           <div className="analyze-progress">
             <p className="analyze-progress-label">AI 분석·저장 중…</p>
@@ -535,14 +742,15 @@ function UploadRowItem({
         {row.status === 'error' && (
           <div className="analyze-result-idle">
             <p className="analyze-result-error">{row.error}</p>
-            {canAnalyzeOne && (
+            {(row.files.length > 0 && !isSaved && !uploadLocked) && (
               <button type="button" className="btn-analyze-row" onClick={onAnalyzeOne}>
                 다시 분석
               </button>
             )}
           </div>
         )}
+        </div>
       </div>
-    </div>
+    </article>
   )
 }

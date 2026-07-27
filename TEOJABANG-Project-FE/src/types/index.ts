@@ -25,6 +25,18 @@ export interface House {
   hasYard: boolean
   publicTransportScore: number
   diagnosis: DiagnosisItem[]
+  otherFeatures?: string
+}
+
+export interface HouseRegisterInput {
+  name: string
+  address: string
+  deposit: number
+  rentYearly: number
+  vehicleAccess: boolean
+  hasWarehouse: boolean
+  hasYard: boolean
+  otherFeatures?: string
 }
 
 export interface UserConditions {
@@ -43,14 +55,96 @@ export interface RankedHouse {
   reasons: string[]
 }
 
+export type CostGroupKey = 'housing' | 'farmland' | 'farming'
+
+export type CostPackageKey = 'house' | 'farm'
+
+export interface CostLineItem {
+  label: string
+  amount: number
+  note?: string
+  group: CostGroupKey
+}
+
+export interface CostGroup {
+  key: CostGroupKey
+  label: string
+  amount: number
+  items: CostLineItem[]
+}
+
+export interface RepairEstimate {
+  min: number
+  max: number
+  cautionCount: number
+  dangerCount: number
+  onsiteCount: number
+  flaggedItems: string[]
+  note: string
+}
+
+export type BudgetStatus = 'within' | 'over' | 'over_with_repair'
+
+export interface BudgetComparison {
+  budget: number
+  total: number
+  totalWithRepairMin: number
+  totalWithRepairMax: number
+  status: BudgetStatus
+  diff: number
+  repairDiffMin: number
+  repairDiffMax: number
+  tips: string[]
+}
+
+export interface FarmlandQuote {
+  unitPrice: number
+  minUnitPrice: number
+  maxUnitPrice: number
+  minAmount: number
+  maxAmount: number
+  farmSizeSqm: number
+  sourceNote: string
+}
+
+export interface CostPackage {
+  key: CostPackageKey
+  label: string
+  description: string
+  total: number
+  totalWithRepairMin: number
+  totalWithRepairMax: number
+  groupKeys: CostGroupKey[]
+}
+
 export interface CostBreakdown {
   deposit: number
   rentYearly: number
   farmland: number
+  farmlandQuote: FarmlandQuote
   farmingPrep: number
   machinery: number
+  repair: RepairEstimate
+  housingTotal: number
+  farmlandTotal: number
+  farmingTotal: number
+  farmPackageTotal: number
+  housePackageTotal: number
   total: number
-  items: { label: string; amount: number; note?: string }[]
+  totalWithRepairMin: number
+  totalWithRepairMax: number
+  houseWithRepairMin: number
+  houseWithRepairMax: number
+  packages: CostPackage[]
+  groups: CostGroup[]
+  items: CostLineItem[]
+  budget: BudgetComparison
+}
+
+export interface VisitChecklistEntry {
+  category: string
+  note: string
+  checked: boolean
 }
 
 export interface VisitApplication {
@@ -61,6 +155,7 @@ export interface VisitApplication {
   name: string
   phone: string
   memo: string
+  checklist?: VisitChecklistEntry[]
   submittedAt: string
 }
 

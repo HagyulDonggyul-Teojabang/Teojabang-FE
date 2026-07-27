@@ -61,10 +61,20 @@ export default function RankingResult({
                 ))}
               </ul>
               <div className="house-meta">
-                <span>월 임대 {item.house.rent.toLocaleString()}원</span>
-                <span>{item.house.area}㎡</span>
+                <span>보증금 {(item.house.deposit / 10000).toLocaleString()}만</span>
+                <span>연 임대 {(item.house.rent * 12).toLocaleString()}원</span>
                 <span>농지 {item.house.farmlandDistanceMin}분</span>
               </div>
+              {(item.house.vehicleAccess || item.house.hasWarehouse || item.house.hasYard) && (
+                <div className="house-feature-tags">
+                  {item.house.vehicleAccess && <span>트럭 진입</span>}
+                  {item.house.hasWarehouse && <span>창고</span>}
+                  {item.house.hasYard && <span>마당</span>}
+                </div>
+              )}
+              {item.house.otherFeatures && (
+                <p className="house-other-features">기타: {item.house.otherFeatures}</p>
+              )}
             </div>
           </article>
         ))}

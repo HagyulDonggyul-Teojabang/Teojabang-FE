@@ -68,6 +68,10 @@ function conditionScore(
     reasons.push('마당·작업 공간 확보')
   }
 
+  if (house.otherFeatures) {
+    reasons.push(`기타 확인: ${house.otherFeatures}`)
+  }
+
   const dangerCount = house.diagnosis.filter((d) => d.status === 'danger').length
   const cautionCount = house.diagnosis.filter((d) => d.status === 'caution').length
   score -= dangerCount * 8

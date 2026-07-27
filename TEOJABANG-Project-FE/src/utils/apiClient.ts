@@ -43,6 +43,9 @@ export async function readJsonResponse<T>(res: Response, fallback: string): Prom
   try {
     return JSON.parse(text) as T
   } catch {
-    throw new Error(`${fallback} (HTTP ${res.status}, JSON 아님)`)
+    const preview = text.replace(/\s+/g, ' ').trim().slice(0, 120)
+    throw new Error(
+      `${fallback} (HTTP ${res.status}). 서버 응답: ${preview || '내용 없음'}`,
+    )
   }
 }
