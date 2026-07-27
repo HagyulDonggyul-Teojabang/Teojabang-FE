@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
+import BrandLogo from './components/BrandLogo'
 import ConditionForm from './components/ConditionForm'
 import CostReport from './components/CostReport'
 import HousePhotoAnalyze from './components/HousePhotoAnalyze'
+import LandingPage from './components/LandingPage'
 import RankingResult from './components/RankingResult'
 import VisitApplicationForm, { VisitComplete } from './components/VisitApplication'
 import type { AppStep, House, UserConditions, VisitApplication } from './types'
 import { calculateCost } from './utils/costCalculator'
 import { fetchHouses } from './utils/houseApi'
+import { hasValidAiDiagnosis } from './utils/format'
 import { rankHouses } from './utils/scoring'
 import { saveVisitApplication } from './utils/visitStorage'
 
@@ -18,43 +21,41 @@ const STEPS: { key: AppStep; label: string }[] = [
 ]
 
 export default function App() {
-  const [step, setStep] = useState<AppStep>('conditions')
+  const [step, setStep] = useState<AppStep>('landing')
   const [conditions, setConditions] = useState<UserConditions | null>(null)
   const [houses, setHouses] = useState<House[]>([])
   const [housesReady, setHousesReady] = useState(false)
-  const [housesLoading, setHousesLoading] = useState(true)
+  const [housesLoading, setHousesLoading] = useState(false)
   const [analyzeKey, setAnalyzeKey] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [application, setApplication] = useState<VisitApplication | null>(null)
   const [isAdminMode, setIsAdminMode] = useState(false)
 
   useEffect(() => {
-    let cancelled = false
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }, [step])
 
-    fetchHouses()
+  function loadHouses() {
+    setHousesLoading(true)
+    return fetchHouses()
       .then((loaded) => {
-        if (!cancelled) {
-          setHouses(loaded)
-          setHousesReady(loaded.length >= 3)
-        }
+        setHouses(loaded)
+        setHousesReady(loaded.filter(hasValidAiDiagnosis).length >= 3)
       })
       .catch(() => {
-        if (!cancelled) {
-          setHouses([])
-          setHousesReady(false)
-        }
+        setHouses([])
+        setHousesReady(false)
       })
       .finally(() => {
-        if (!cancelled) {
-          setHousesLoading(false)
-          setAnalyzeKey((key) => key + 1)
-        }
+        setHousesLoading(false)
+        setAnalyzeKey((key) => key + 1)
       })
+  }
 
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  function handleStart() {
+    setStep('conditions')
+    void loadHouses()
+  }
 
   const ranked = useMemo(
     () => (conditions && houses.length > 0 ? rankHouses(houses, conditions) : []),
@@ -84,38 +85,29 @@ export default function App() {
   }
 
   function handleRestart() {
-    setStep('conditions')
+    setStep('landing')
     setConditions(null)
     setSelectedId(null)
     setApplication(null)
-    setHousesLoading(true)
-    fetchHouses()
-      .then((loaded) => {
-        setHouses(loaded)
-        setHousesReady(loaded.length >= 3)
-      })
-      .catch(() => {
-        setHouses([])
-        setHousesReady(false)
-      })
-      .finally(() => {
-        setHousesLoading(false)
-        setAnalyzeKey((key) => key + 1)
-      })
+    setHouses([])
+    setHousesReady(false)
+    setHousesLoading(false)
+    setIsAdminMode(false)
   }
 
   const stepIndex = STEPS.findIndex((s) => s.key === step)
+
+  if (step === 'landing') {
+    return <LandingPage onStart={handleStart} />
+  }
 
   return (
     <div className="app">
       <header className="app-header">
         <div className="header-top">
           <div className="logo">
-            <span className="logo-icon">🏠</span>
-            <div>
-              <h1>터잡앙</h1>
-              <p className="tagline">AI 기반 청년농 맞춤 빈집 분석·비교</p>
-            </div>
+            <BrandLogo />
+            <p className="tagline">AI 기반 청년농 맞춤 빈집 분석·비교</p>
           </div>
 
           {step === 'conditions' && (

@@ -1,4 +1,4 @@
-import type { DiagnosisItem, DiagnosisStatus } from '../types'
+import type { DiagnosisItem, DiagnosisStatus, House } from '../types'
 
 export const STATUS_LABEL: Record<DiagnosisStatus, string> = {
   good: '양호',
@@ -19,6 +19,26 @@ export function formatWon(amount: number): string {
 
 export function formatDiagnosisSummary(diagnosis: DiagnosisItem[]): string {
   return diagnosis
-    .map((item) => `${item.category} ${STATUS_LABEL[item.status]}`)
-    .join(' · ')
+    .map((item, index) => {
+      const status = STATUS_LABEL[item.status]
+      const note = item.note.trim()
+      const headline = note ? `${item.category} ${status} — ${note}` : `${item.category} ${status}`
+      return `${index + 1}. ${headline}`
+    })
+    .join('\n')
+}
+
+const FALLBACK_NOTE = 'AI 분석 일시 불가'
+
+export function isFallbackDiagnosis(diagnosis: DiagnosisItem[]): boolean {
+  return (
+    diagnosis.length > 0 &&
+    diagnosis.every(
+      (item) => item.status === 'onsite' && item.note.includes(FALLBACK_NOTE),
+    )
+  )
+}
+
+export function hasValidAiDiagnosis(house: Pick<House, 'diagnosis' | 'aiWarning'>): boolean {
+  return !house.aiWarning && !isFallbackDiagnosis(house.diagnosis)
 }

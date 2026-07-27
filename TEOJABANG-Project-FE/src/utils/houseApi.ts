@@ -59,6 +59,7 @@ export async function registerHouse(
   formData.append('hasWarehouse', String(meta.hasWarehouse))
   formData.append('hasYard', String(meta.hasYard))
   formData.append('publicTransportScore', String(meta.publicTransportScore))
+  formData.append('slotIndex', String(slotIndex))
   if (meta.otherFeatures) {
     formData.append('otherFeatures', meta.otherFeatures)
   }
@@ -83,6 +84,27 @@ export async function registerHouse(
 
   if (!res.ok) {
     throw new Error(parseApiError(data, '빈집 등록에 실패했습니다'))
+  }
+
+  return normalizeHouse(data, slotIndex)
+}
+
+export async function reanalyzeHouse(houseId: string, slotIndex: number): Promise<House> {
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE}/houses/${encodeURIComponent(houseId)}/reanalyze`, {
+      method: 'POST',
+    })
+  } catch {
+    throw new Error(
+      '백엔드 서버에 연결할 수 없습니다. Teojabang-BE가 http://localhost:8000 에서 실행 중인지 확인해 주세요.',
+    )
+  }
+
+  const data = await readJsonResponse<ApiHouse>(res, 'AI 재분석에 실패했습니다')
+
+  if (!res.ok) {
+    throw new Error(parseApiError(data, 'AI 재분석에 실패했습니다'))
   }
 
   return normalizeHouse(data, slotIndex)

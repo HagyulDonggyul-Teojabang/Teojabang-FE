@@ -26,6 +26,7 @@ export interface House {
   publicTransportScore: number
   diagnosis: DiagnosisItem[]
   otherFeatures?: string
+  aiWarning?: string
 }
 
 export interface HouseRegisterInput {
@@ -159,4 +160,4 @@ export interface VisitApplication {
   submittedAt: string
 }
 
-export type AppStep = 'conditions' | 'ranking' | 'cost' | 'visit' | 'complete'
+export type AppStep = 'landing' | 'conditions' | 'ranking' | 'cost' | 'visit' | 'complete'

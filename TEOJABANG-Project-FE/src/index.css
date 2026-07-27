@@ -95,9 +95,81 @@ button {
 
 .logo {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 0;
+}
+
+.brand-logo {
+  display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 0;
+}
+
+.brand-logo--landing {
+  flex-direction: column;
+  gap: 16px;
+  text-align: center;
+}
+
+.brand-logo-icon {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.brand-logo--landing .brand-logo-icon {
+  font-size: 4rem;
+}
+
+.brand-logo-name {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.brand-logo--landing .brand-logo-name {
+  font-size: 2.5rem;
+}
+
+.brand-logo--image {
+  display: block;
+  object-fit: contain;
+}
+
+.brand-logo--default.brand-logo--image {
+  height: 40px;
+  width: auto;
+}
+
+.brand-logo--landing.brand-logo--image {
+  height: 120px;
+  width: auto;
+  max-width: min(280px, 80vw);
+}
+
+.landing-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  width: 100%;
+  padding: 24px 16px;
+}
+
+.landing-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;
+}
+
+.landing-start-btn {
+  min-width: 200px;
+  padding: 14px 32px;
+  font-size: 1rem;
+  font-weight: 600;
 }
 
 .admin-mode-toggle {
@@ -1575,8 +1647,10 @@ button {
 
 .analyze-result-text {
   font-size: 0.9rem;
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--text);
+  white-space: pre-line;
+  text-align: left;
 }
 
 .analyze-result-error {
