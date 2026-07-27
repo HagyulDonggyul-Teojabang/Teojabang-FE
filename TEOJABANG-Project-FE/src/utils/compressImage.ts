@@ -1,5 +1,5 @@
-const MAX_LONG_EDGE = 1280
-const JPEG_QUALITY = 0.75
+const MAX_LONG_EDGE = 512
+const JPEG_QUALITY = 0.68
 
 export async function compressImageForAnalysis(file: File): Promise<File> {
   const bitmap = await createImageBitmap(file)

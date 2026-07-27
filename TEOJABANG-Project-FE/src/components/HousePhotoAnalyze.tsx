@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { DiagnosisItem, House, HouseRegisterInput } from '../types'
-import { formatDiagnosisSummary } from '../utils/format'
-import { registerHouse, resetAllHouses, resolveAssetUrl } from '../utils/houseApi'
+import { formatDiagnosisSummary, hasValidAiDiagnosis } from '../utils/format'
+import { compressImageForAnalysis } from '../utils/compressImage'
+import { registerHouse, reanalyzeHouse, resetAllHouses, resolveAssetUrl } from '../utils/houseApi'
 
 const MAX_ROWS = 3
 const PROGRESS_CAP = 90
-const COMPLETE_ANIM_MS = 500
-const STAGGER_MS = 2_000
+const COMPLETE_ANIM_MS = 150
 
-const ESTIMATE_BASE_MS = 8_000
-const ESTIMATE_PER_IMAGE_MS = 2_000
-const ESTIMATE_PER_MB_MS = 800
+const ESTIMATE_BASE_MS = 3_000
+const ESTIMATE_PER_IMAGE_MS = 500
+const ESTIMATE_PER_MB_MS = 200
 
 function estimateAnalysisMs(files: File[]): number {
   const totalMb = files.reduce((sum, file) => sum + file.size, 0) / (1024 * 1024)
@@ -20,10 +20,6 @@ function estimateAnalysisMs(files: File[]): number {
 function progressTarget(elapsedMs: number, estimatedMs: number): number {
   const tau = estimatedMs / 2.3
   return PROGRESS_CAP * (1 - Math.exp(-elapsedMs / tau))
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 type RowStatus = 'idle' | 'analyzing' | 'done' | 'error'
@@ -73,6 +69,8 @@ function createRow(): UploadRow {
 }
 
 function rowFromHouse(house: House): UploadRow {
+  const failed = !hasValidAiDiagnosis(house)
+
   return {
     id: house.id,
     name: house.name,
@@ -86,12 +84,14 @@ function rowFromHouse(house: House): UploadRow {
     otherFeatures: house.otherFeatures ?? '',
     files: [],
     previewUrls: [resolveAssetUrl(house.imageUrl)],
-    status: 'done',
-    progress: 100,
-    summary: formatDiagnosisSummary(house.diagnosis),
-    diagnosis: house.diagnosis,
+    status: failed ? 'error' : 'done',
+    progress: failed ? 0 : 100,
+    summary: failed ? null : formatDiagnosisSummary(house.diagnosis),
+    diagnosis: failed ? null : house.diagnosis,
     savedHouse: house,
-    error: null,
+    error: failed
+      ? house.aiWarning ?? 'AI 분석에 실패했습니다. 아래 버튼으로 다시 시도해 주세요.'
+      : null,
   }
 }
 
@@ -186,7 +186,7 @@ export default function HousePhotoAnalyze({
     (nextRows: UploadRow[]) => {
       const houses = nextRows
         .map((row) => row.savedHouse)
-        .filter((house): house is House => house !== null)
+        .filter((house): house is House => house !== null && hasValidAiDiagnosis(house))
       onHousesChange(houses)
       onReadyChange(houses.length === MAX_ROWS)
     },
@@ -283,7 +283,8 @@ export default function HousePhotoAnalyze({
     startProgress(rowId, files)
 
     try {
-      const house = await registerHouse(files, slotIndex, input)
+      const compressedFiles = await Promise.all(files.map(compressImageForAnalysis))
+      const house = await registerHouse(compressedFiles, slotIndex, input)
       stopProgress(rowId)
       await animateProgressTo100(rowId)
       progressControllers.current.delete(rowId)
@@ -331,6 +332,56 @@ export default function HousePhotoAnalyze({
     }
   }
 
+  async function runReanalysis(rowId: string, house: House, slotIndex: number): Promise<void> {
+    displayProgressRef.current.set(rowId, 0)
+    setRows((prev) =>
+      prev.map((row) =>
+        row.id === rowId
+          ? { ...row, status: 'analyzing', progress: 0, error: null }
+          : row,
+      ),
+    )
+    startProgress(rowId, [])
+
+    try {
+      const updated = await reanalyzeHouse(house.id, slotIndex)
+      stopProgress(rowId)
+      await animateProgressTo100(rowId)
+      progressControllers.current.delete(rowId)
+
+      setRows((prev) =>
+        prev.map((row) =>
+          row.id === rowId
+            ? {
+                ...row,
+                status: 'done',
+                progress: 100,
+                diagnosis: updated.diagnosis,
+                summary: formatDiagnosisSummary(updated.diagnosis),
+                savedHouse: updated,
+                error: null,
+              }
+            : row,
+        ),
+      )
+    } catch (err) {
+      stopProgress(rowId)
+      displayProgressRef.current.delete(rowId)
+      setRows((prev) =>
+        prev.map((row) =>
+          row.id === rowId
+            ? {
+                ...row,
+                status: 'error',
+                progress: 0,
+                error: err instanceof Error ? err.message : 'AI 재분석에 실패했습니다',
+              }
+            : row,
+        ),
+      )
+    }
+  }
+
   function handleFiles(rowId: string, fileList: FileList | null) {
     if (!fileList?.length || isLocked) return
 
@@ -363,7 +414,9 @@ export default function HousePhotoAnalyze({
   }
 
   function countSavedHouses(nextRows: UploadRow[]): number {
-    return nextRows.filter((row) => row.savedHouse !== null).length
+    return nextRows.filter(
+      (row) => row.savedHouse !== null && hasValidAiDiagnosis(row.savedHouse),
+    ).length
   }
 
   function updateRow(rowId: string, patch: Partial<UploadRow>) {
@@ -384,21 +437,18 @@ export default function HousePhotoAnalyze({
     if (targets.length === 0) return
 
     setIsBatchRunning(true)
-    setBatchProgress({ current: 1, total: targets.length })
+    setBatchProgress({ current: targets.length, total: targets.length })
 
     try {
-      for (let i = 0; i < targets.length; i++) {
-        if (i > 0) {
-          await sleep(STAGGER_MS)
-          setBatchProgress({ current: i + 1, total: targets.length })
-        }
+      await Promise.all(
+        targets.map(async (target) => {
+          const row = rowsRef.current.find((item) => item.id === target.id)
+          if (!row || !isRowReadyForAnalysis(row)) return
 
-        const row = rowsRef.current.find((item) => item.id === targets[i].id)
-        if (!row || !isRowReadyForAnalysis(row)) continue
-
-        const slotIndex = countSavedHouses(rowsRef.current)
-        await runAnalysis(row.id, row.files, slotIndex, rowToRegisterInput(row))
-      }
+          const slotIndex = rowsRef.current.findIndex((item) => item.id === target.id)
+          await runAnalysis(row.id, row.files, slotIndex, rowToRegisterInput(row))
+        }),
+      )
     } finally {
       setIsBatchRunning(false)
       setBatchProgress(null)
@@ -421,6 +471,16 @@ export default function HousePhotoAnalyze({
 
     const slotIndex = countSavedHouses(rowsRef.current)
     void runAnalysis(rowId, row.files, slotIndex, rowToRegisterInput(row))
+  }
+
+  function handleReanalyze(rowId: string) {
+    if (isLocked) return
+
+    const row = rowsRef.current.find((item) => item.id === rowId)
+    if (!row?.savedHouse || row.status === 'analyzing') return
+
+    const slotIndex = rowsRef.current.findIndex((item) => item.id === rowId)
+    void runReanalysis(rowId, row.savedHouse, slotIndex)
   }
 
   function addRow() {
@@ -466,7 +526,9 @@ export default function HousePhotoAnalyze({
 
   const uploadedCount = rows.filter((row) => row.files.length > 0 || row.savedHouse).length
   const readyCount = rows.filter(isRowReadyForAnalysis).length
-  const completedCount = rows.filter((row) => row.savedHouse !== null).length
+  const completedCount = rows.filter(
+    (row) => row.savedHouse !== null && hasValidAiDiagnosis(row.savedHouse),
+  ).length
 
   return (
     <section className="panel analyze-panel">
@@ -481,7 +543,7 @@ export default function HousePhotoAnalyze({
 
       {batchProgress && (
         <p className="analyze-batch-banner" role="status">
-          빈집 {batchProgress.current}/{batchProgress.total} 분석·저장 중…
+          빈집 {batchProgress.total}개 동시 분석·저장 중…
         </p>
       )}
 
@@ -495,6 +557,7 @@ export default function HousePhotoAnalyze({
             onFiles={(files) => handleFiles(row.id, files)}
             onRowUpdate={(patch) => updateRow(row.id, patch)}
             onAnalyzeOne={() => handleAnalyzeOne(row.id)}
+            onReanalyze={() => handleReanalyze(row.id)}
           />
         ))}
       </div>
@@ -540,6 +603,7 @@ function UploadRowItem({
   onFiles,
   onRowUpdate,
   onAnalyzeOne,
+  onReanalyze,
 }: {
   row: UploadRow
   index: number
@@ -547,6 +611,7 @@ function UploadRowItem({
   onFiles: (files: FileList | null) => void
   onRowUpdate: (patch: Partial<UploadRow>) => void
   onAnalyzeOne: () => void
+  onReanalyze: () => void
 }) {
   const inputId = useId()
   const nameId = useId()
@@ -554,11 +619,12 @@ function UploadRowItem({
   const depositId = useId()
   const rentYearlyId = useId()
   const otherId = useId()
-  const isSaved = row.savedHouse !== null
+  const isSaved = row.savedHouse !== null && hasValidAiDiagnosis(row.savedHouse)
+  const needsReanalyze = row.savedHouse !== null && !hasValidAiDiagnosis(row.savedHouse)
   const hasPhotos = row.files.length > 0 || isSaved
   const canAnalyzeOne = isRowReadyForAnalysis(row) && !uploadLocked
   const validationHint = metaValidationError(row)
-  const disabled = uploadLocked || isSaved
+  const disabled = uploadLocked || isSaved || needsReanalyze
 
   return (
     <article className="upload-row-card">
@@ -742,7 +808,12 @@ function UploadRowItem({
         {row.status === 'error' && (
           <div className="analyze-result-idle">
             <p className="analyze-result-error">{row.error}</p>
-            {(row.files.length > 0 && !isSaved && !uploadLocked) && (
+            {needsReanalyze && !uploadLocked && (
+              <button type="button" className="btn-analyze-row" onClick={onReanalyze}>
+                AI 재분석
+              </button>
+            )}
+            {(row.files.length > 0 && !isSaved && !needsReanalyze && !uploadLocked) && (
               <button type="button" className="btn-analyze-row" onClick={onAnalyzeOne}>
                 다시 분석
               </button>
