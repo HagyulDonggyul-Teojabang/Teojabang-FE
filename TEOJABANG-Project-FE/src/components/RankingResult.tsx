@@ -33,7 +33,7 @@ export default function RankingResult({
       <div className="panel-header">
         <span className="step-badge">STEP 2</span>
         <h2>AI 분석 · 적합도 순위</h2>
-        <p>입력하신 조건 기준으로 빈집 3채를 비교·진단했습니다.</p>
+        <p>입력하신 조건 기준으로 업로드한 빈집 3채를 비교·매칭했습니다.</p>
       </div>
 
       <div className="ranking-list">

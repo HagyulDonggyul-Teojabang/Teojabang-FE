@@ -3,6 +3,7 @@ import { CROPS, REGIONS } from '../data/mockHouses'
 
 interface ConditionFormProps {
   initial?: UserConditions
+  housesReady: boolean
   onSubmit: (conditions: UserConditions) => void
 }
 
@@ -16,7 +17,7 @@ const defaultConditions: UserConditions = {
   needsYard: true,
 }
 
-export default function ConditionForm({ initial, onSubmit }: ConditionFormProps) {
+export default function ConditionForm({ initial, housesReady, onSubmit }: ConditionFormProps) {
   const conditions = initial ?? defaultConditions
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -36,9 +37,9 @@ export default function ConditionForm({ initial, onSubmit }: ConditionFormProps)
   return (
     <section className="panel">
       <div className="panel-header">
-        <span className="step-badge">STEP 1</span>
+        <span className="step-badge">STEP 2</span>
         <h2>영농 조건 입력</h2>
-        <p>희망 조건을 입력하면 AI가 빈집 3채를 분석·비교합니다.</p>
+        <p>희망 조건을 입력하면 업로드한 빈집 3채를 비교·매칭합니다.</p>
       </div>
 
       <form className="form-grid" onSubmit={handleSubmit}>
@@ -107,8 +108,16 @@ export default function ConditionForm({ initial, onSubmit }: ConditionFormProps)
           </label>
         </fieldset>
 
-        <button type="submit" className="btn btn-primary btn-full">
-          AI 분석 시작
+        {!housesReady && (
+          <p className="form-hint">빈집 3채 사진 업로드·AI 분석을 모두 완료해 주세요.</p>
+        )}
+
+        <button
+          type="submit"
+          className="btn btn-primary btn-full"
+          disabled={!housesReady}
+        >
+          업로드한 3채 비교하기
         </button>
       </form>
     </section>
