@@ -4,14 +4,18 @@ import { STATUS_LABEL } from '../utils/format'
 
 interface VisitApplicationFormProps {
   house: House
-  onSubmit: (application: Omit<VisitApplication, 'submittedAt'>) => void
+  onSubmit: (application: Omit<VisitApplication, 'submittedAt'>) => void | Promise<void>
   onBack: () => void
+  submitting?: boolean
+  submitError?: string | null
 }
 
 export default function VisitApplicationForm({
   house,
   onSubmit,
   onBack,
+  submitting = false,
+  submitError = null,
 }: VisitApplicationFormProps) {
   const checklistItems = house.diagnosis.filter((d) => d.status === 'onsite')
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({})
@@ -106,12 +110,18 @@ export default function VisitApplicationForm({
           <textarea name="memo" rows={3} placeholder="추가 문의사항을 입력하세요" />
         </label>
 
+        {submitError && (
+          <p className="form-error full-width" role="alert">
+            {submitError}
+          </p>
+        )}
+
         <div className="action-row full-width">
-          <button type="button" className="btn btn-secondary" onClick={onBack}>
+          <button type="button" className="btn btn-secondary" onClick={onBack} disabled={submitting}>
             이전
           </button>
-          <button type="submit" className="btn btn-primary">
-            방문 신청하기
+          <button type="submit" className="btn btn-primary" disabled={submitting}>
+            {submitting ? '접수 중…' : '방문 신청하기'}
           </button>
         </div>
       </form>
