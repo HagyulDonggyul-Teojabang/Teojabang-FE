@@ -20,7 +20,11 @@ const defaultConditions: UserConditions = {
 
 const FARM_SIZE_PRESETS = [100, 200, 300, 500] as const
 
-export default function ConditionForm({ initial, housesReady, onSubmit }: ConditionFormProps) {
+export default function ConditionForm({
+  initial,
+  housesReady,
+  onSubmit,
+}: ConditionFormProps) {
   const conditions = initial ?? defaultConditions
   const [farmSize, setFarmSize] = useState(conditions.farmSize)
 
@@ -45,9 +49,14 @@ export default function ConditionForm({ initial, housesReady, onSubmit }: Condit
   return (
     <section className="panel">
       <div className="panel-header">
-        <span className="step-badge">STEP 2</span>
+        <span className="step-badge">STEP 1</span>
         <h2>영농 조건 입력</h2>
-        <p>희망 조건을 입력하면 업로드한 빈집 3채를 비교·매칭합니다.</p>
+        <p>희망 조건을 입력하면 등록된 빈집 3채를 비교·매칭합니다.</p>
+        {!housesReady && (
+          <p className="panel-notice" role="status">
+            관리자가 빈집 등록을 완료하면 비교를 시작할 수 있습니다.
+          </p>
+        )}
       </div>
 
       <form className="form-grid" onSubmit={handleSubmit}>
@@ -108,10 +117,6 @@ export default function ConditionForm({ initial, housesReady, onSubmit }: Condit
             step={1000000}
           />
         </label>
-
-        {!housesReady && (
-          <p className="form-hint">빈집 3채 사진 업로드·AI 분석을 모두 완료해 주세요.</p>
-        )}
 
         <button
           type="submit"

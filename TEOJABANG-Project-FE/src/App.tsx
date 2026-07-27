@@ -26,6 +26,7 @@ export default function App() {
   const [analyzeKey, setAnalyzeKey] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [application, setApplication] = useState<VisitApplication | null>(null)
+  const [isAdminMode, setIsAdminMode] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -108,12 +109,27 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <div className="logo">
-          <span className="logo-icon">🏠</span>
-          <div>
-            <h1>터잡앙</h1>
-            <p className="tagline">AI 기반 청년농 맞춤 빈집 분석·비교</p>
+        <div className="header-top">
+          <div className="logo">
+            <span className="logo-icon">🏠</span>
+            <div>
+              <h1>터잡앙</h1>
+              <p className="tagline">AI 기반 청년농 맞춤 빈집 분석·비교</p>
+            </div>
           </div>
+
+          {step === 'conditions' && (
+            <label className="admin-mode-toggle">
+              <span className="admin-mode-label">관리자 시점으로 보기</span>
+              <input
+                type="checkbox"
+                checked={isAdminMode}
+                onChange={(e) => setIsAdminMode(e.target.checked)}
+                aria-label="관리자 시점으로 보기"
+              />
+              <span className="admin-mode-switch" aria-hidden="true" />
+            </label>
+          )}
         </div>
 
         {step !== 'complete' && (
@@ -134,21 +150,24 @@ export default function App() {
       <main className="app-main">
         {step === 'conditions' && (
           <>
-            {housesLoading ? (
-              <p className="analyze-result-empty">저장된 빈집 불러오는 중…</p>
-            ) : (
-              <HousePhotoAnalyze
-                key={analyzeKey}
-                initialHouses={houses}
-                onHousesChange={setHouses}
-                onReadyChange={setHousesReady}
+            {isAdminMode &&
+              (housesLoading ? (
+                <p className="analyze-result-empty">저장된 빈집 불러오는 중…</p>
+              ) : (
+                <HousePhotoAnalyze
+                  key={analyzeKey}
+                  initialHouses={houses}
+                  onHousesChange={setHouses}
+                  onReadyChange={setHousesReady}
+                />
+              ))}
+            {!isAdminMode && (
+              <ConditionForm
+                initial={conditions ?? undefined}
+                housesReady={housesReady}
+                onSubmit={handleConditionsSubmit}
               />
             )}
-            <ConditionForm
-              initial={conditions ?? undefined}
-              housesReady={housesReady}
-              onSubmit={handleConditionsSubmit}
-            />
           </>
         )}
 
